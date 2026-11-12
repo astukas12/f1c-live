@@ -9,7 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root { --bg:#0a0a0a; --fg:#e8e8e8; --gold:#E8C547; --muted:#8a8a8a; --faint:#5c5c5c; --line:#1f1f1f; --card:#111;
-        --up:#4cc38a; --down:#e5484d; --live:#e5484d; }
+        --down:#e5484d; --live:#E8C547; --soon:#5aa9e6; --done:#9a9a9a; }
 * { box-sizing: border-box; }
 html { color-scheme: dark; }
 body { margin:0; background:var(--bg); color:var(--fg); font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
@@ -73,17 +73,18 @@ td.name span.strip { display:flex; gap:1px; width:6.6rem; margin-top:.3rem; }
 .pl td.pn { white-space:normal; text-align:left; }
 .pl td.pn .st.s2 { display:block; }
 .pl td.rg { font-size:.7rem; color:var(--faint); }
+.pl .sl { display:block; font-size:.66rem; color:#7a7a7a; line-height:1.3; margin-top:.05rem; }
 .pl tr.bench { opacity:.55; }
-.pl tr.s-in td { background:rgba(229,72,77,.07); }
-.pl tr.s-in td.slot { box-shadow:inset 3px 0 0 #e5484d; }
-.pl tr.s-post td.slot { box-shadow:inset 3px 0 0 rgba(76,195,138,.6); }
-.pl tr.s-pre td.slot { box-shadow:inset 3px 0 0 #3a3a3a; }
+.pl tr.s-in td { background:rgba(232,197,71,.07); }
+.pl tr.s-in td.slot { box-shadow:inset 3px 0 0 var(--live); }
+.pl tr.s-post td.slot { box-shadow:inset 3px 0 0 rgba(154,154,154,.5); }
+.pl tr.s-pre td.slot { box-shadow:inset 3px 0 0 rgba(90,169,230,.6); }
 .pl tr.s-in td.now { color:#fff; font-weight:700; }
 .pl tr.s-post td.now { color:var(--fg); }
 .pl tr.s-pre td.proj { color:#fff; font-weight:600; }
-.pl .st.done, .lg .c-post { color:#5fae86; }
-.pl .st.up, .lg .c-pre { color:var(--muted); }
-.lg .c-in { color:var(--live); }
+.pl .st.done, .lg .c-post { color:var(--done); }
+.pl .st.up, .lg .c-pre { color:var(--soon); }
+.lg .c-in, .pl .st.s2.live { color:var(--live); }
 .lg { font-size:.68rem; padding:.15rem .6rem 0; display:flex; gap:.9rem; text-align:left; }
 .pd { display:inline-block; width:.42rem; height:.42rem; border-radius:50%; background:var(--live); margin-right:.3rem; vertical-align:.05rem; animation:pulse 1.6s infinite; }
 .hide-sm { }
@@ -198,12 +199,17 @@ function scoreBox(sum) {
       for (const a of cat.athletes || []) {
         const id = a.athlete.id, v = {};
         cat.keys.forEach((k, i) => v[k] = parseFloat(String(a.stats[i]).split("/")[0]) || 0);
-        const o = out[id] || (out[id] = { pts: 0, team, name: a.athlete.displayName });
+        const o = out[id] || (out[id] = { pts: 0, team, name: a.athlete.displayName, st: {} }), st = o.st;
         switch (cat.name) {
-          case "passing":   o.pts += .04 * Math.max(0, v.passingYards) + 4 * v.passingTouchdowns - v.interceptions; break;
-          case "rushing":   o.pts += .1 * Math.max(0, v.rushingYards) + 6 * v.rushingTouchdowns; break;
-          case "receiving": o.pts += v.receptions + .1 * Math.max(0, v.receivingYards) + 6 * v.receivingTouchdowns; break;
-          case "fumbles":   o.pts -= v.fumblesLost; break;
+          case "passing":   o.pts += .04 * Math.max(0, v.passingYards) + 4 * v.passingTouchdowns - v.interceptions;
+            { const ca = String(a.stats[cat.keys.indexOf("completions/passingAttempts")] || "").split("/");
+              st.cmp = +ca[0] || 0; st.att = +ca[1] || 0; }
+            st.py = v.passingYards || 0; st.ptd = v.passingTouchdowns || 0; st.int = v.interceptions || 0; break;
+          case "rushing":   o.pts += .1 * Math.max(0, v.rushingYards) + 6 * v.rushingTouchdowns;
+            st.ra = v.rushingAttempts || 0; st.ry = v.rushingYards || 0; st.rtd = v.rushingTouchdowns || 0; break;
+          case "receiving": o.pts += v.receptions + .1 * Math.max(0, v.receivingYards) + 6 * v.receivingTouchdowns;
+            st.rec = v.receptions || 0; st.rcy = v.receivingYards || 0; st.rctd = v.receivingTouchdowns || 0; st.tgt = v.receivingTargets || 0; break;
+          case "fumbles":   o.pts -= v.fumblesLost; st.fl = v.fumblesLost || 0; break;
           case "kickReturns": o.pts += 6 * (v.kickReturnTouchdowns || 0); break;
           case "puntReturns": o.pts += 6 * (v.puntReturnTouchdowns || 0); break;
         }
@@ -215,7 +221,7 @@ function scoreBox(sum) {
   for (const nm of twoPointNames(sum)) {
     let hit = ents.filter(([, o]) => key(o.name) === key(nm));
     if (hit.length !== 1) hit = ents.filter(([, o]) => abbr(o.name) === abbr(nm.replace(/\.\s?/, ". ")));
-    if (hit.length === 1) hit[0][1].pts += 2; else console.warn("two-point: no unique match for", nm);
+    if (hit.length === 1) { hit[0][1].pts += 2; hit[0][1].st.two = (hit[0][1].st.two || 0) + 1; } else console.warn("two-point: no unique match for", nm);
   }
   return out;
 }
@@ -253,7 +259,8 @@ function replayAt(T) {
     else { let a = 0, h = 0; for (const s of g.sp || []) if (s.t <= el) { a = s.a; h = s.h; } g.ascore = a; g.hscore = h; }
     g.hideScore = g.state === "in" && !(g.sp && g.sp.length);
     g.label = g.state === "pre" ? fmtKick(g.kickoff) : g.state === "post" ? "Final" : `Q${q} ${g.clock}`;
-    for (const [id, o] of Object.entries(finalBox[g.id] || {})) stats[id] = { ...o, pts: o.pts * p };
+    for (const [id, o] of Object.entries(finalBox[g.id] || {}))
+      stats[id] = { ...o, pts: o.pts * p, st: p === 1 ? o.st : null };   // scaled counts read oddly (0-15 rec), so the stat line waits for the final
   }
 }
 
@@ -269,7 +276,7 @@ function playerNow(p) {
   if (!g) return { pts: 0, frac: 0, state: "bye" };
   let s = p.espn && stats[p.espn];
   if (!s) { const id = byNameTeam[key(p.name) + "|" + p.nfl]; s = id && stats[id]; }
-  return { pts: s ? s.pts : 0, frac: g.frac, state: g.state };
+  return { pts: s ? s.pts : 0, frac: g.frac, state: g.state, st: s && s.st };
 }
 function indexNames() {
   byNameTeam = {};
@@ -382,6 +389,19 @@ function stLabel(n, p) {
   if (n.state === "post") return `<span class="st s2 done">Final${esc(teamScore(g, p.nfl))}</span>`;
   return `<span class="st s2 live"><i class="pd"></i>Playing · ${esc(gameClock(g).trim())}${esc(teamScore(g, p.nfl))}</span>`;
 }
+function statLine(pos, st) {
+  if (!st) return "";
+  const td = n => n ? `, ${n} TD` : "";
+  const pass = st.att ? `${st.cmp}/${st.att}, ${st.py} yds${td(st.ptd)}${st.int ? `, ${st.int} INT` : ""}` : "";
+  const rush = l => st.ra ? `${st.ra}-${st.ry}${l ? " rush" : ""}${td(st.rtd)}` : "";
+  const rec = l => st.rec || st.tgt ? `${st.rec || 0}-${st.rcy || 0}${l ? " rec" : ""}${td(st.rctd)}${st.tgt ? ` (${st.tgt} tgt)` : ""}` : "";
+  const parts = pos === "QB" ? [pass, rush(true), rec(true)] : pos === "RB" ? [rush(false), rec(true)] : [rec(false), rush(true)];
+  if (st.two) parts.push(st.two > 1 ? `${st.two} 2PT` : "2PT");
+  if (st.fl) parts.push(`${st.fl} FL`);
+  const t = parts.filter(Boolean).join(" · ");
+  return t ? `<span class="sl">${esc(t)}</span>` : "";
+}
+const allFinal = r => r.now.every(n => n.state !== "pre" && n.state !== "in");
 function rankStrip(r) {
   const mx = Math.max(...r.rk, 1e-9);
   return '<span class="strip">' + r.rk.map((x, k) => `<i title="${ordn(k + 1)}: ${pct(100 * x)}"${x > 0 ? ` style="background:rgba(232,197,71,${(.12 + .88 * x / mx).toFixed(2)})"` : ""}></i>`).join("") + "</span>";
@@ -398,7 +418,8 @@ function render(res) {
     const left = r.playing || r.left ? `${r.playing ? r.playing + " playing · " : ""}${r.left} to play` : "done";
     h += `<tr class="team${k === 0 ? " first" : ""}${open ? " open" : ""}" data-id="${esc(t.id)}">
       <td class="pos">${k + 1}</td><td class="l name"><b>${esc(t.name)}</b><span>${esc(t.franchise)} · ${left}</span>
-      <span class="fin">Likely finish ${ordn(r.mode + 1)} · range ${ordn(r.r10 + 1)}–${ordn(r.r90 + 1)}</span>${rankStrip(r)}</td>
+      ${allFinal(r) ? `<span class="fin">Final: ${ordn(r.mode + 1)}</span>` :
+        `<span class="fin">Likely finish ${ordn(r.mode + 1)} · range ${ordn(r.r10 + 1)}–${ordn(r.r90 + 1)}</span>${rankStrip(r)}`}</td>
       <td class="big">${f1(r.cur)}</td><td class="dim">${f1(r.mean)}</td>
       <td>${pct(r.win)}<span class="bar hide-sm" style="width:${(2.2 * r.win / maxW).toFixed(2)}rem"></span></td>
       <td class="hide-sm">${pct(r.top3)}</td><td>${pct(r.top6)}</td><td>${r.ef1.toFixed(1)}</td></tr>`;
@@ -462,14 +483,15 @@ function playersTable(r) {
   const starters = shown.filter(i => r.slot[i]).sort((a, b) => by(a, b, r.slot[a], r.slot[b]));
   const bench = shown.filter(i => !r.slot[i]).sort((a, b) => by(a, b, r.ps[a].pos, r.ps[b].pos));
   const live = shown.filter(i => r.now[i].state !== "bye"), cnt = st => live.filter(i => r.now[i].state === st).length;
-  const sum = [`Now ${f1(r.cur)}`, `Proj ${f1(r.mean)}`, `range ${Math.round(r.lo)}–${Math.round(r.hi)}`,
-    `${cnt("in")} playing`, `${cnt("pre")} to play`, `${cnt("post")} done`].join(" · ");
+  const sum = (allFinal(r) ? [`Final ${f1(r.cur)}`, `${cnt("post")} done`] :
+    [`Now ${f1(r.cur)}`, `Proj ${f1(r.mean)}`, `range ${Math.round(r.lo)}–${Math.round(r.hi)}`,
+     `${cnt("in")} playing`, `${cnt("pre")} to play`, `${cnt("post")} done`]).join(" · ");
   const row = (i, on) => {
     const p = r.ps[i], n = r.now[i], fd = finalDist(p, n), pre = n.state === "pre" || n.state === "bye";
     const sc = { in: "s-in", post: "s-post", pre: "s-pre" }[n.state] || "";
     return `<tr class="${on ? "" : "bench "}${sc}"><td class="slot">${on ? r.slot[i] : p.pos}</td>
-      <td class="pn">${esc(p.name)} <span class="st">${esc(p.nfl)}</span>${stLabel(n, p)}</td>
-      <td class="now">${pre ? '<span class="dim">–</span>' : f1(n.pts)}</td><td class="proj">${f1(fd.mu)}</td><td class="rg">${Math.round(fd.lo)}–${Math.round(fd.hi)}</td></tr>`;
+      <td class="pn">${esc(p.name)} <span class="st">${esc(p.nfl)}</span>${stLabel(n, p)}${n.state === "in" || n.state === "post" ? statLine(p.pos, n.st) : ""}</td>
+      <td class="now">${pre ? '<span class="dim">–</span>' : f1(n.pts)}</td><td class="proj">${n.state === "post" ? '<span class="dim">–</span>' : f1(fd.mu)}</td><td class="rg">${n.state === "post" ? "" : `${Math.round(fd.lo)}–${Math.round(fd.hi)}`}</td></tr>`;
   };
   const head = t => `<tr class="grp"><td class="gl" colspan="2">${t}</td><td>Now</td><td>Proj</td><td>Range</td></tr>`;
   let h = `<div class="tsum">${sum}</div><div class="lg"><span class="c-in">● Live</span><span class="c-post">● Final</span><span class="c-pre">● To play</span></div><table class="pl">` + head("In the lineup") + starters.map(i => row(i, true)).join("");
