@@ -73,6 +73,7 @@ td.name span.strip { display:flex; gap:1px; width:6.6rem; margin-top:.3rem; }
 .pl td.pn { white-space:normal; text-align:left; }
 .pl td.pn .st.s2 { display:block; }
 .pl td.rg { font-size:.7rem; color:var(--faint); }
+.ot { font-size:.58rem; font-weight:600; color:#d6d6d6; border:1px solid #4a4a4a; border-radius:3px; padding:0 .25rem; margin-left:.3rem; vertical-align:.05rem; }
 .pl .sl { display:block; font-size:.66rem; color:#7a7a7a; line-height:1.3; margin-top:.05rem; }
 .pl tr.bench { opacity:.55; }
 .pl tr.s-in td { background:rgba(232,197,71,.07); }
@@ -103,7 +104,7 @@ td.name span.strip { display:flex; gap:1px; width:6.6rem; margin-top:.3rem; }
   <h2>Live Standings</h2>
   <div class="tools"><button class="btn" id="toggle" type="button">Show all lineups</button></div>
   <table id="board"></table>
-  <p class="note">Tap a team for its lineup. The strip under each team shows its chance of each finish this week, 1st on the left. Player ranges run from a low (10th percentile) to a high (90th percentile) final. Projected and odds come from <span id="srcs">the sims</span>; players in games underway keep their points so far plus a sim of the time left.</p>
+  <p class="note">Tap a team for its lineup. The strip under each team shows its chance of each finish this week, 1st on the left. Player ranges run from a low (10th percentile) to a high (90th percentile) final. Projected and odds come from <span id="srcs">the sims</span>; players in games underway keep their points so far plus a sim of the time left, matched to how the game is going (sims that look like the game so far count more, players who have left the game or haven't touched the ball are cut, and usage so far tilts the rest).</p>
 
   <h2>Win Odds This Week</h2>
   <svg class="chart" id="chart" viewBox="0 0 720 260"></svg>
@@ -133,9 +134,11 @@ const ESPN_TEAM = { WSH: "WAS", LAR: "LA" };
 const GAME_SEC = 3600, REAL_GAME_MS = 3.2 * 3600e3;
 const Q = new URLSearchParams(location.search);
 const REPLAY = Q.get("replay") === "1";
+let MODEL = Q.get("model") === "simple" ? "simple" : "smart";   // ?model=simple: points so far + pre-game sim x time left
 const COLORS = ["#E8C547", "#4cc38a", "#5aa9e6", "#e5484d", "#c58af9", "#f08c3a"];
 
 let L, D;                  // week data, Int16 draws (tenths)
+let TM = null, TMROW = {}; // GTS games: each team's simulated fantasy total per sim (tenths), team -> row
 let games = [];            // ESPN events: {id, away, home, kickoff, state, frac, label, ascore, hscore}
 let stats = {};            // espn athlete id -> {pts, team}
 let byNameTeam = {};       // "name|TEAM" -> espn id
@@ -227,25 +230,38 @@ function scoreBox(sum) {
 }
 
 async function loadStats() {
-  const need = games.filter(g => g.state !== "pre" && !(g.state === "post" && finalBox[g.id]));
+  // box scores for games under way (finished games once); the play-by-play comes in the same summary.
+  // Games kicking off within 3 hours: the summary for ESPN's injury report (Out / IR), every 10 minutes.
+  const t0 = Date.now();
+  const need = games.filter(g => (g.state !== "pre" && !(g.state === "post" && finalBox[g.id])) ||
+    (g.state === "pre" && g.kickoff - t0 < 3 * 3600e3 && !(g.injT && t0 - g.injT < 10 * 60e3)));
   await Promise.all(need.map(async g => {
-    try { const b = scoreBox(await getJSON(`${ESPN}summary?event=${g.id}`)); if (g.state === "post") finalBox[g.id] = b; else g.box = b; }
-    catch (e) { console.warn(e); }
+    try {
+      const sum = await getJSON(`${ESPN}summary?event=${g.id}`);
+      g.inj = injuries(sum); g.injT = t0;
+      if (g.state === "pre") return;
+      const b = scoreBox(sum); g.pbp = parsePBP(sum, g);
+      if (g.state === "post") finalBox[g.id] = b; else g.box = b;
+    } catch (e) { console.warn(e); }
   }));
   stats = {};
-  for (const g of games) Object.assign(stats, finalBox[g.id] || g.box || {});
+  for (const g of games) { Object.assign(stats, finalBox[g.id] || g.box || {}); g.ps = g.pbp ? pbpState(g, Infinity) : null; }
+}
+function injuries(sum) {   // ESPN's injury report for both teams: athlete id -> "Out", "Injured Reserve", "Questionable", ...
+  const o = {};
+  for (const t of sum.injuries || []) for (const i of t.injuries || []) if (i.athlete && i.athlete.id) o[i.athlete.id] = i.status;
+  return o;
 }
 
-// Replay: every game is final; a time slider replays the day with each game's points scaled by time played
+// Replay: every game is final. The slider replays the day from ESPN's play-by-play (points, usage and injury notes as
+// they stood at that moment); finished games use the final box score.
 const clockSec = c => { const m = /^(\d+):(\d+)/.exec((c && c.displayValue) || ""); return m ? 60 * +m[1] + +m[2] : (c && c.value) || 0; };
 const mmss = x => `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, "0")}`;
 async function loadReplay() {
   await Promise.all(games.map(async g => {
     const sum = await getJSON(`${ESPN}summary?event=${g.id}`);
-    finalBox[g.id] = scoreBox(sum); g.fa = g.ascore; g.fh = g.hscore;
-    // the score through the day comes from the scoring plays (game seconds elapsed -> score after the play)
-    g.sp = (sum.scoringPlays || []).map(s => ({ t: ((s.period && s.period.number) - 1) * 900 + 900 - clockSec(s.clock), a: s.awayScore, h: s.homeScore }))
-      .sort((x, y) => x.t - y.t);
+    finalBox[g.id] = scoreBox(sum); g.fa = g.ascore; g.fh = g.hscore; g.pbp = parsePBP(sum, g);
+    for (const [id, o] of Object.entries(finalBox[g.id])) TEAM_OF[id] = o.team;
   }));
 }
 function replayAt(T) {
@@ -255,28 +271,145 @@ function replayAt(T) {
     g.frac = 1 - p; g.state = p === 0 ? "pre" : p === 1 ? "post" : "in";
     const el = p * GAME_SEC, q = Math.min(4, 1 + Math.floor(el / 900));
     g.period = q; g.clock = mmss(Math.max(0, q * 900 - el)); g.half = false;
-    if (g.state === "post") { g.ascore = g.fa; g.hscore = g.fh; }
-    else { let a = 0, h = 0; for (const s of g.sp || []) if (s.t <= el) { a = s.a; h = s.h; } g.ascore = a; g.hscore = h; }
-    g.hideScore = g.state === "in" && !(g.sp && g.sp.length);
+    g.ps = pbpState(g, p === 1 ? Infinity : el);
+    if (g.state === "post") { g.ascore = g.fa; g.hscore = g.fh; } else { g.ascore = g.ps.a; g.hscore = g.ps.h; }
+    g.hideScore = false;
     g.label = g.state === "pre" ? fmtKick(g.kickoff) : g.state === "post" ? "Final" : `Q${q} ${g.clock}`;
-    for (const [id, o] of Object.entries(finalBox[g.id] || {}))
-      stats[id] = { ...o, pts: o.pts * p, st: p === 1 ? o.st : null };   // scaled counts read oddly (0-15 rec), so the stat line waits for the final
+    if (g.state === "post") Object.assign(stats, finalBox[g.id] || {});
   }
 }
 
+// ---------- play-by-play ----------
+// Each play becomes stat changes for the players named in it ("J.Allen pass short right to K.Coleman ... for 8 yards"),
+// keyed by offense + first initial and last name; plus "X was injured" / "X has returned" notes.
+const NM = "[A-Z][A-Za-z']*\\.\\s?(?:St\\. |Van |Le |De |Mc)?[A-Z][A-Za-z'-]+(?: (?:Jr|Sr|II|III|IV)\\b\\.?)?";
+const RE_PASS = new RegExp(`(${NM}) pass\\b`), RE_TGT = new RegExp(`(?:\\bto|intended for) (${NM})`);
+const RE_SNAP = new RegExp(`^Direct snap to ${NM}\\.\\s*`);
+const RE_SACK = new RegExp(`(${NM}) sacked`), RE_RUSH = new RegExp(`^(${NM}) (?!pass\\b|sacked\\b|spiked\\b)`);
+const RE_INJ = new RegExp(`(?:\\b([A-Z]{2,3})-)?(${NM}) was injured`, "g"), RE_RET = new RegExp(`(?:\\b([A-Z]{2,3})-)?(${NM}) has returned`, "g");
+const OFF_TYPES = /^(Rush|Rushing Touchdown|Pass Reception|Passing Touchdown|Pass Incompletion|Pass Interception Return|Interception Return Touchdown|Sack|Sack Opp Fumble Recovery|Fumble Recovery \(Own\)|Fumble Recovery \(Opponent\)|Safety)$/;
+const PFX = { BLT: "BAL", CLV: "CLE", HST: "HOU", ARZ: "ARI", SL: "LA", LAR: "LA", WSH: "WAS", JAC: "JAX" };
+const nmKey = x => { const m = /^([A-Z])[A-Za-z']*\.\s?(.*)$/.exec(x.trim()); return m ? (m[1] + m[2].replace(/ (Jr|Sr|II|III|IV)\.?$/, "")).toLowerCase().replace(/[^a-z]/g, "") : ""; };
+const plKey = name => { const w = name.replace(/\s+(Jr\.?|Sr\.?|II|III|IV|V)$/i, "").trim().split(/\s+/); return (w[0][0] + w.slice(1).join("")).toLowerCase().replace(/[^a-z]/g, ""); };
+function parsePBP(sum, g) {
+  const dr = (sum.drives && sum.drives.previous) || [], cur = sum.drives && sum.drives.current;
+  const seen = new Set(), ev = [];
+  const tm = x => { const t = x && (PFX[x] || teamCode(x)); return t === g.away || t === g.home ? t : null; };
+  for (const d of cur ? [...dr, cur] : dr) {
+    const off = teamCode((d.team && d.team.abbreviation) || "");
+    for (const p of d.plays || []) {
+      if (seen.has(p.id)) continue; seen.add(p.id);
+      const per = (p.period && p.period.number) || 1, type = (p.type && p.type.text) || "";
+      let tx = p.text || "";
+      const e = { t: (per - 1) * 900 + 900 - clockSec(p.clock), off, a: p.awayScore, h: p.homeScore, dl: [], inv: [], inj: [], ret: [], offPlay: false };
+      for (const m of tx.matchAll(RE_INJ)) e.inj.push([tm(m[1]), nmKey(m[2])]);
+      for (const m of tx.matchAll(RE_RET)) e.ret.push([tm(m[1]), nmKey(m[2])]);
+      const tp = /TWO-POINT CONVERSION ATTEMPT\.(.*?)ATTEMPT (SUCCEEDS|FAILS)/i.exec(tx);
+      if (tp) {
+        tx = tx.slice(0, tp.index);
+        if (/SUCCEEDS/i.test(tp[2])) for (const w of (tp[1].match(new RegExp(NM, "g")) || []).slice(0, /\bpass\b/i.test(tp[1]) ? 2 : 1)) e.dl.push([nmKey(w), "two", 1]);
+      }
+      e.offPlay = OFF_TYPES.test(type) && !/\bNo Play\b|NULLIFIED/i.test(tx);
+      if (e.offPlay) {
+        let body = tx.trim(), b0;
+        do { b0 = body; body = body.replace(/^\([^)]*\)\s*/, "").replace(/^.*?reported in as eligible\.\s*/, "").replace(RE_SNAP, "").trim(); } while (body !== b0);
+        // yards from the text ("for 9 yards", "for no gain"): ESPN's statYardage also counts penalty yards
+        const ym = /(?:^|\W)for (-?\d+) yards?(?:\W|$)|(?:^|\W)for no gain/.exec(body);
+        const yds = ym ? +(ym[1] || 0) : p.statYardage || 0, td = /^(Passing|Rushing) Touchdown$/.test(type) || (/^(Pass Reception|Rush)$/.test(type) && /\bTOUCHDOWN\b/.test(tx));
+        let m, carrier = null;
+        if ((m = RE_PASS.exec(body))) {
+          const qb = nmKey(m[1]), t = RE_TGT.exec(body.slice(m.index + m[0].length)), wr = t && nmKey(t[1]);
+          const comp = wr && (/^(Pass Reception|Passing Touchdown)$/.test(type) || (/^Fumble/.test(type) && !/incomplete/i.test(body)));
+          e.dl.push([qb, "att", 1]); e.inv.push(qb);
+          if (wr) { e.dl.push([wr, "tgt", 1]); e.inv.push(wr); }
+          if (comp) { e.dl.push([qb, "cmp", 1], [qb, "py", yds], [wr, "rec", 1], [wr, "rcy", yds]); if (td) e.dl.push([qb, "ptd", 1], [wr, "rctd", 1]); carrier = wr; }
+          if (/INTERCEPT/i.test(tx)) e.dl.push([qb, "int", 1]);
+        } else if ((m = RE_SACK.exec(body))) { const qb = nmKey(m[1]); e.inv.push(qb); e.dl.push([qb, "sk", 1]); carrier = qb; }
+        else if ((m = RE_RUSH.exec(body))) { const rb = nmKey(m[1]); e.inv.push(rb); e.dl.push([rb, "ra", 1], [rb, "ry", yds]); if (td) e.dl.push([rb, "rtd", 1]); carrier = rb; }
+        if (carrier && /^(Fumble Recovery \(Opponent\)|Sack Opp Fumble Recovery)$/.test(type)) e.dl.push([carrier, "fl", 1]);
+      }
+      ev.push(e);
+    }
+  }
+  return ev;
+}
+const pbpPts = s => .04 * Math.max(0, s.py || 0) + 4 * (s.ptd || 0) - (s.int || 0) + .1 * Math.max(0, s.ry || 0) + 6 * (s.rtd || 0) +
+  (s.rec || 0) + .1 * Math.max(0, s.rcy || 0) + 6 * (s.rctd || 0) - (s.fl || 0) + 2 * (s.two || 0);
+function pbpState(g, elSec) {   // the game up to elSec game-seconds in
+  const pl = {}, plays = {}, team = {}; let a = 0, h = 0;
+  const get = (off, k) => pl[off + "|" + k] || (pl[off + "|" + k] = { st: {}, inv: 0, hurt: false, hurtAt: 0 });
+  for (const e of g.pbp || []) {
+    if (e.t > elSec) break;
+    if (e.a != null) { a = e.a; h = e.h; }
+    if (e.offPlay) plays[e.off] = (plays[e.off] || 0) + 1;
+    for (const [k, f, v] of e.dl) { const o = get(e.off, k); o.st[f] = (o.st[f] || 0) + v; }
+    for (const k of e.inv) { const o = get(e.off, k); o.inv++; o.hurt = false; }
+    for (const [t, k] of e.inj) for (const off of t ? [t] : [g.away, g.home]) if (t || pl[off + "|" + k]) { const o = get(off, k); o.hurt = true; o.hurtAt = plays[off] || 0; }
+    for (const [t, k] of e.ret) for (const off of t ? [t] : [g.away, g.home]) { const o = pl[off + "|" + k]; if (o) o.hurt = false; }
+  }
+  for (const [kk, o] of Object.entries(pl)) {
+    const s = o.st, off = kk.split("|")[0];
+    o.pts = pbpPts(s); o.opps = (s.tgt || 0) + (s.ra || 0) + (s.att || 0) + (s.sk || 0);
+    team[off] = (team[off] || 0) + o.pts;
+  }
+  return { pl, plays, team, a, h };
+}
+
 // ---------- players ----------
+let GBT = {}, TEAM_OF = {};   // team -> game; replay: ESPN athlete id -> the team he played for
 function attachGames() {
-  const gByTeam = {};
+  const gByTeam = GBT = {};
   for (const g of games) { gByTeam[g.away] = g; gByTeam[g.home] = g; }
   for (const p of L.players) p.game = gByTeam[p.nfl] || null;
+  const best = {};
+  for (const p of L.players) { const k = p.nfl + "|" + plKey(p.name); if (!best[k] || p.proj > best[k].proj) best[k] = p; }
+  for (const p of L.players) p.pkeyLost = best[p.nfl + "|" + plKey(p.name)] !== p;
 }
 function playerNow(p) {
-  // points so far and share of game left for one rostered player
-  const g = p.game;
-  if (!g) return { pts: 0, frac: 0, state: "bye" };
+  // points so far, share of game left, and (smart model) a multiplier on the time left with the reason for it
   let s = p.espn && stats[p.espn];
   if (!s) { const id = byNameTeam[key(p.name) + "|" + p.nfl]; s = id && stats[id]; }
-  return { pts: s ? s.pts : 0, frac: g.frac, state: g.state, st: s && s.st };
+  const tm = (s && s.team) || (p.espn && TEAM_OF[p.espn]) || p.nfl, g = (tm !== p.nfl && GBT[tm]) || p.game;
+  if (!g) return { pts: 0, frac: 0, state: "bye", m: 1, tag: "" };
+  const u = g.ps && !p.pkeyLost && g.ps.pl[tm + "|" + plKey(s ? s.name : p.name)];
+  const n = { pts: s ? s.pts : 0, frac: g.frac, state: g.state, st: s && s.st, u, m: 1, tag: "", g, tm };
+  if (REPLAY && g.state === "in") { n.pts = u ? u.pts : 0; n.st = u ? u.st : null; }
+  if (MODEL === "smart") adjust(p, n, s, g);
+  return n;
+}
+// Opportunities per projected point (QB dropbacks + carries; RB carries + targets; WR/TE targets + carries),
+// fit on week 9 (rostered players projected over 3 points)
+const KOPP = { QB: 2.1, RB: 1.3, WR: .57, TE: .56 };
+// Tested on weeks 8 and 9 (every game stopped at 25/50/75% and compared with the finals): the sqrt spread, A and B
+// help; matching sims to the game so far (kc, team totals kd) cut player error a little but made team totals worse
+// early in both weeks, so it is off unless the page is opened with ?match=1.
+const CFG = Q.get("match") === "1" ? { kc: 4, cc: 6, kd: 3, cd: 8, wb: .5, sqrtv: true } : { kc: 0, cc: 6, kd: 0, cd: 8, wb: .5, sqrtv: true };
+function adjust(p, n, s, g) {
+  const el = 1 - n.frac, u = n.u, box = (s && s.st) || {};
+  const listedOut = !REPLAY && /^(Out|Injured Reserve)$/i.test((g.inj && p.espn && g.inj[p.espn]) || "");
+  const opps = Math.max(u ? u.opps : 0, (box.tgt || 0) + (box.ra || 0) + (p.pos === "QB" ? box.att || 0 : 0));
+  n.opps = opps;
+  if (n.state === "pre") { if (listedOut) { n.m = 0; n.tag = "Out"; n.why = "ESPN injury report: out"; } return; }
+  if (n.state !== "in") return;
+  // A: out of the game
+  if (listedOut && !opps) { n.m = 0; n.tag = "Out"; n.why = "ESPN injury report: out"; return; }
+  // (weeks 8-9: players hurt and not back for 25+ plays never returned; one came back after 17. Players with no
+  // touches at halftime scored about their projection after it, so that only trims late in the game.)
+  if (u && u.hurt) {
+    const since = ((g.ps && g.ps.plays[n.tm]) || 0) - u.hurtAt;
+    if (since >= 25) { n.m = 0; n.tag = "Out?"; n.why = `injured, not back for ${since} plays`; }
+    else if (since >= 8) { n.m = .3; n.tag = "Hurt"; n.why = `injured, not back for ${since} plays`; }
+    else { n.m = .7; n.tag = "Hurt"; n.why = "injured on a recent play"; }
+    return;
+  }
+  if (!opps && el >= .75 && p.proj > 4) { n.m = .5; n.tag = "No touches"; n.why = "no touches or targets through three quarters"; return; }
+  // B: usage pace so far vs what his projection implies, trusted more as the game goes on (less in GTS games,
+  // where matching the sims to the game already does part of this)
+  const exp = (KOPP[p.pos] || 0) * p.proj * el;
+  if (exp >= 2 && el >= .1) {
+    const w = CFG.wb * (p.src === "gts" ? .5 : 1) * el;
+    n.pace = opps / exp; n.m = 1 + w * (Math.min(2, Math.max(.4, n.pace)) - 1);
+  }
 }
 function indexNames() {
   byNameTeam = {};
@@ -307,22 +440,70 @@ function lineupNow(ps, vals) {
   return slot;
 }
 
+function seeded(seed) { let a = seed >>> 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function teamSoFar(g, team) {   // the real team's fantasy points so far (every player, rostered or not)
+  if (REPLAY && g.state === "in") return (g.ps && g.ps.team[team]) || 0;
+  let x = 0; for (const o of Object.values(g.box || finalBox[g.id] || {})) if (o.team === team) x += o.pts;
+  return x;
+}
+// C + D: in a GTS game under way, weight each sim by how well its first part (each rostered player's points x share
+// of the game played, and both teams' fantasy totals) matches the game so far, then resample whole sims for the rest
+// of the game so teammates move together. Weights are tempered if they lean on too few sims.
+function gameIndex(g, N, NR, gps) {
+  const el = 1 - g.frac, lw = new Float64Array(N);
+  const add = (x, base, M, k, c) => { for (let s = 0; s < N; s++) { const e = M[base + s] / 10 * el, sd = k * Math.sqrt(e) + c, z = (x - e) / sd; lw[s] += -.5 * z * z - Math.log(sd); } };
+  if (CFG.kc) for (const [p, n] of gps) add(n.pts, p.row * NR, D, CFG.kc, CFG.cc);
+  if (CFG.kd) for (const t of [g.away, g.home]) if (TM && TMROW[t] != null) add(teamSoFar(g, t), TMROW[t] * NR, TM, CFG.kd, CFG.cd);
+  let mx = -Infinity; for (let s = 0; s < N; s++) if (lw[s] > mx) mx = lw[s];
+  const w = new Float64Array(N), target = Math.min(300, .3 * N);
+  const ess = tau => { let a = 0, b = 0; for (let s = 0; s < N; s++) { const v = Math.exp(tau * (lw[s] - mx)); w[s] = v; a += v; b += v * v; } return a * a / b; };
+  let tau = 1, E = ess(1);
+  if (E < target) { let lo = 0, hi = 1; for (let k = 0; k < 18; k++) { const mid = (lo + hi) / 2; if (ess(mid) < target) hi = mid; else lo = mid; } tau = lo; E = ess(tau); }
+  g.ess = Math.round(E); g.tau = +tau.toFixed(3);
+  let tot = 0; for (let s = 0; s < N; s++) tot += w[s];
+  const rnd = seeded(+g.id || 7), idx = new Int32Array(N), step = tot / N, u0 = rnd() * step;
+  for (let s = 0, j = 0, c = w[0]; s < N; s++) { const u = u0 + s * step; while (c < u && j < N - 1) c += w[++j]; idx[s] = j; }
+  for (let s = N - 1; s > 0; s--) { const k = Math.floor(rnd() * (s + 1)), t = idx[s]; idx[s] = idx[k]; idx[k] = t; }
+  return idx;
+}
+
 function runSims(withGames, nUse) {
   // nUse: sims to run (the first nUse draws of each player's N-long row); the board uses all of them
   const NR = L.nsim, N = Math.min(nUse || NR, NR), T = L.teams, nT = T.length;
   const teamPs = T.map(t => L.players.filter(p => p.fid === t.id));
   const now = teamPs.map(ps => ps.map(playerNow));
+  const nowOf = new Map(); teamPs.forEach((ps, t) => ps.forEach((p, i) => nowOf.set(p, now[t][i])));
+  const gidx = new Map();
+  if (MODEL === "smart") for (const g of games) {
+    if (g.state !== "in" || g.frac > .97) continue;
+    const gps = L.players.filter(p => p.src === "gts" && p.row != null && nowOf.has(p) && nowOf.get(p).g === g).map(p => [p, nowOf.get(p)]);
+    if (gps.length && (CFG.kc || CFG.kd)) gidx.set(g, gameIndex(g, N, NR, gps));
+  }
+  // each player's points still to come, per sim
+  const REM = teamPs.map((ps, t) => ps.map((p, i) => {
+    const n = now[t][i], R = new Float32Array(N), f = n.state === "bye" ? 1 : n.frac * n.m;
+    if (p.row == null || f === 0) return R;
+    const base = p.row * NR, idx = p.src === "gts" && n.g ? gidx.get(n.g) : null;
+    for (let s = 0; s < N; s++) R[s] = D[base + (idx ? idx[s] : s)] / 10;
+    if (MODEL === "smart" && CFG.sqrtv && n.state === "in") {
+      const fr = n.frac; let dm = 0; for (let s = 0; s < N; s++) dm += R[s]; dm /= N;
+      const a = Math.sqrt(fr);
+      for (let s = 0; s < N; s++) R[s] = n.m * Math.max(0, fr * dm + a * (R[s] - dm));
+    } else for (let s = 0; s < N; s++) R[s] *= f;
+    return R;
+  }));
   const scores = T.map(() => new Float32Array(N));
   for (let t = 0; t < nT; t++) {
     const ps = teamPs[t], pos = ps.map(p => p.pos), v = new Float32Array(ps.length);
     for (let s = 0; s < N; s++) {
-      for (let i = 0; i < ps.length; i++) {
-        const n = now[t][i], d = ps[i].row == null ? 0 : D[ps[i].row * NR + s] / 10;
-        v[i] = n.state === "bye" ? d : n.pts + d * n.frac;
-      }
+      for (let i = 0; i < ps.length; i++) v[i] = now[t][i].pts + REM[t][i][s];
       scores[t][s] = bestBall(v, pos);
     }
   }
+  if (withGames) teamPs.forEach((ps, t) => ps.forEach((p, i) => {   // each player's final: mean and 10th-90th percentile
+    const n = now[t][i], R = REM[t][i]; let sm = 0; for (let s = 0; s < N; s++) sm += R[s];
+    const srt = Float32Array.from(R).sort(); n.mu = n.pts + sm / N; n.lo = n.pts + srt[Math.floor(.1 * (N - 1))]; n.hi = n.pts + srt[Math.floor(.9 * (N - 1))];
+  }));
   const win = new Float64Array(nT), top3 = new Float64Array(nT), top6 = new Float64Array(nT), ef1 = new Float64Array(nT), mean = new Float64Array(nT);
   const rankOf = new Uint8Array(nT * N), rk = new Float64Array(nT * nT);
   const ord = [...Array(nT).keys()];
@@ -344,20 +525,20 @@ function runSims(withGames, nUse) {
              left: now[i].filter((n, j) => n.state === "pre" && teamPs[i][j].proj > 0).length,
              playing: now[i].filter((n, j) => n.state === "in" && teamPs[i][j].proj > 0).length };
   });
-  if (withGames) res.swings = gameSwings(teamPs, now, rankOf, N, NR);
+  if (withGames) res.swings = gameSwings(teamPs, REM, rankOf, N);
   return res;
 }
 
 // For each unfinished game: split sims by how many points its rostered players score in the time left,
 // then compare every team's win odds in the top half vs the bottom half.
-function gameSwings(teamPs, now, rankOf, N, NR) {
+function gameSwings(teamPs, REM, rankOf, N) {
   const out = {};
   for (const g of games) {
     if (g.frac <= 0) continue;
     const rem = new Float32Array(N); let n = 0;
     teamPs.forEach((ps, t) => ps.forEach((p, i) => {
       if (p.game !== g || p.row == null) return; n++;
-      for (let s = 0; s < N; s++) rem[s] += D[p.row * NR + s] / 10 * now[t][i].frac;
+      const R = REM[t][i]; for (let s = 0; s < N; s++) rem[s] += R[s];
     }));
     if (!n) { out[g.id] = { n: 0, swing: 0 }; continue; }
     const med = Float32Array.from(rem).sort()[N >> 1];
@@ -384,10 +565,10 @@ function teamScore(g, team) {   // "BUF 17-10": the player's team first
 const gameClock = g => g.half ? "Half" : g.period > 4 ? `OT ${g.clock || ""}` : `Q${g.period} ${g.clock || ""}`;
 function stLabel(n, p) {
   if (n.state === "bye") return '<span class="st s2">Bye</span>';
-  const g = p.game;
+  const g = n.g || p.game;
   if (n.state === "pre") return `<span class="st s2 up">To play · ${esc(fmtKick(g.kickoff))}</span>`;
-  if (n.state === "post") return `<span class="st s2 done">Final${esc(teamScore(g, p.nfl))}</span>`;
-  return `<span class="st s2 live"><i class="pd"></i>Playing · ${esc(gameClock(g).trim())}${esc(teamScore(g, p.nfl))}</span>`;
+  if (n.state === "post") return `<span class="st s2 done">Final${esc(teamScore(g, n.tm || p.nfl))}</span>`;
+  return `<span class="st s2 live"><i class="pd"></i>Playing · ${esc(gameClock(g).trim())}${esc(teamScore(g, n.tm || p.nfl))}</span>`;
 }
 function statLine(pos, st) {
   if (!st) return "";
@@ -472,6 +653,7 @@ function drawQuantiles() {
   }
 }
 function finalDist(p, n) {
+  if (n.mu != null) return { mu: n.mu, lo: n.lo, hi: n.hi };
   if (p.row == null) return { mu: n.pts, lo: n.pts, hi: n.pts };
   const f = n.state === "bye" ? 1 : n.frac, b = n.state === "bye" ? 0 : n.pts;
   return { mu: b + QMU[p.row] * f, lo: b + QLO[p.row] * f, hi: b + QHI[p.row] * f };
@@ -490,7 +672,7 @@ function playersTable(r) {
     const p = r.ps[i], n = r.now[i], fd = finalDist(p, n), pre = n.state === "pre" || n.state === "bye";
     const sc = { in: "s-in", post: "s-post", pre: "s-pre" }[n.state] || "";
     return `<tr class="${on ? "" : "bench "}${sc}"><td class="slot">${on ? r.slot[i] : p.pos}</td>
-      <td class="pn">${esc(p.name)} <span class="st">${esc(p.nfl)}</span>${stLabel(n, p)}${n.state === "in" || n.state === "post" ? statLine(p.pos, n.st) : ""}</td>
+      <td class="pn">${esc(p.name)} <span class="st">${esc(p.nfl)}</span>${n.tag ? `<span class="ot" title="${esc(n.why || "")}">${n.tag}</span>` : ""}${stLabel(n, p)}${n.state === "in" || n.state === "post" ? statLine(p.pos, n.st) : ""}</td>
       <td class="now">${pre ? '<span class="dim">–</span>' : f1(n.pts)}</td><td class="proj">${n.state === "post" ? '<span class="dim">–</span>' : f1(fd.mu)}</td><td class="rg">${n.state === "post" ? "" : `${Math.round(fd.lo)}–${Math.round(fd.hi)}`}</td></tr>`;
   };
   const head = t => `<tr class="grp"><td class="gl" colspan="2">${t}</td><td>Now</td><td>Proj</td><td>Range</td></tr>`;
@@ -602,6 +784,10 @@ async function startReplay() {
     const ww = String(cur.week).padStart(2, "0");
     const [l, bin] = await Promise.all([getJSON(`week-${ww}.json`), fetch(`week-${ww}.bin`, { cache: "no-store" }).then(r => r.arrayBuffer())]);
     L = l; D = new Int16Array(bin); drawQuantiles();
+    if (L.tm && L.tm.length) try {
+      const r = await fetch(`week-${ww}-tm.bin`, { cache: "no-store" });
+      if (r.ok) { TM = new Int16Array(await r.arrayBuffer()); L.tm.forEach(x => TMROW[x.team] = x.row); }
+    } catch (e) { console.warn(e); }
     $("toggle").onclick = () => { if (openTeams.size >= L.teams.length) openTeams.clear(); else L.teams.forEach(t => openTeams.add(t.id));
       if (LAST) render(LAST); else syncToggle(); };
     $("title").textContent = `Week ${L.week} Live`;
