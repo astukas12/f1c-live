@@ -731,16 +731,39 @@ function statusLine() {
     `<span>${done} of ${games.length} final</span>`];
   if (next && !live) parts.push(`<span>Next: ${esc(next.away)} @ ${esc(next.home)}, ${esc(fmtKick(next.kickoff))}</span>`);
   if (!REPLAY) parts.push(`<span>Updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>`);
+  if (!REPLAY && !live && nextTickAt - Date.now() > 5 * 60e3) parts.push(`<span>Next update ${esc(fmtKick(nextTickAt))}</span>`);
   $("status").innerHTML = parts.join("");
 }
-async function tick() {
+// The week file is rebuilt at noon (rosters, after waivers) and before each game window (GTS sims); a new week
+// moves current.json. Either one reloads the page.
+async function dataChanged() {
   try {
-    await loadScoreboard(); attachGames(); await loadStats(); indexNames();
-    LAST = runSims(true); pushHistory(Date.now(), LAST); render(LAST); statusLine(); $("err").innerHTML = "";
-  } catch (e) { console.error(e); $("err").innerHTML = `<div class="err">Couldn't reach live scores (${esc(e.message)}). Retrying.</div>`; }
-  const live = games.some(g => g.state === "in"), soon = games.some(g => g.state === "pre" && g.kickoff - Date.now() < 15 * 60e3);
-  clearTimeout(timer); timer = setTimeout(tick, live || soon ? 60e3 : 5 * 60e3);
+    if (!Q.get("week")) { const cur = await getJSON("current.json"); if (cur.week !== L.week) return true; }
+    const l = await getJSON(`week-${String(L.week).padStart(2, "0")}.json`);
+    return l.built !== L.built;
+  } catch (e) { return false; }
 }
+// While a game is live: every minute (and the week file every 10). Otherwise: one check, then sleep until 15 minutes
+// before the next kickoff, or until the page is opened or shown again.
+let lastDataCheck = Date.now(), nextTickAt = 0, ticking = false;
+async function tick() {
+  if (ticking) return; ticking = true; clearTimeout(timer);
+  try {
+    if (Date.now() - lastDataCheck > 10 * 60e3) { lastDataCheck = Date.now(); if (await dataChanged()) { location.reload(); return; } }
+    await loadScoreboard(); attachGames(); await loadStats(); indexNames();
+    LAST = runSims(true); pushHistory(Date.now(), LAST); $("err").innerHTML = "";
+  } catch (e) { console.error(e); $("err").innerHTML = `<div class="err">Couldn't reach live scores (${esc(e.message)}). Retrying.</div>`; }
+  const now = Date.now(), live = games.some(g => g.state === "in");
+  const next = games.filter(g => g.state === "pre").map(g => g.kickoff).sort((a, b) => a - b)[0];
+  const wait = live || !games.length ? 60e3 : next ? Math.max(60e3, next - 15 * 60e3 - now) : 6 * 3600e3;
+  nextTickAt = now + wait; ticking = false;
+  if (LAST) { render(LAST); statusLine(); }
+  timer = setTimeout(tick, Math.min(wait, 2 ** 31 - 1));
+}
+document.addEventListener("visibilitychange", () => {
+  if (REPLAY || !L || document.visibilityState !== "visible") return;
+  if (nextTickAt - Date.now() > 60e3) { lastDataCheck = 0; tick(); }
+});
 
 function pregame() {   // all games unplayed: the pre-game sims
   const saved = games.map(g => [g.state, g.frac]);
