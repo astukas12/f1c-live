@@ -61,6 +61,19 @@ tr.detail td { padding:0 0 .8rem; background:#0d0d0d; }
 .gts .s { color:var(--muted); font-size:.72rem; }
 .gts .p { margin-left:auto; font-size:.74rem; font-weight:700; color:#0a0a0a; background:var(--gold); border-radius:4px; padding:.1rem .45rem; white-space:nowrap; }
 .err { color:var(--down); font-size:.85rem; margin-top:1rem; }
+td.name span.fin { color:var(--muted); }
+td.name span.strip { display:flex; gap:1px; width:6.6rem; margin-top:.3rem; }
+.strip i { flex:1; height:.32rem; background:#1c1c1c; border-radius:1px; }
+.tools { margin:0 0 .5rem; }
+.btn { background:var(--card); border:1px solid #2a2a2a; color:var(--fg); font:inherit; font-size:.74rem; padding:.3rem .75rem; border-radius:6px; cursor:pointer; }
+.btn:hover { border-color:#3a3a3a; }
+.tsum { font-size:.74rem; color:var(--muted); padding:.6rem .6rem .2rem; white-space:normal; text-align:left; }
+.pl tr.grp td { font-size:.6rem; text-transform:uppercase; letter-spacing:.1em; color:var(--faint); font-weight:600; padding:.65rem .3rem .25rem; }
+.pl tr.grp td.gl { color:var(--gold); text-align:left; padding-left:.6rem; }
+.pl td.pn { white-space:normal; text-align:left; }
+.pl td.pn .st.s2 { display:block; }
+.pl td.rg { font-size:.7rem; color:var(--faint); }
+.pl tr.bench td.rg, .pl tr.bench .st { color:#4a4a4a; }
 .hide-sm { }
 @media (max-width:520px) { .hide-sm { display:none; } td, th { padding-left:.2rem; padding-right:.2rem; } h1 { font-size:1.6rem; } }
 </style>
@@ -75,8 +88,9 @@ tr.detail td { padding:0 0 .8rem; background:#0d0d0d; }
   <div id="err"></div>
 
   <h2>Live Standings</h2>
+  <div class="tools"><button class="btn" id="toggle" type="button">Show all lineups</button></div>
   <table id="board"></table>
-  <p class="note">Tap a team for its players. ● = in the best-ball lineup right now. Projected and odds come from <span id="srcs">the sims</span>; players in games underway keep their points so far plus a sim of the time left.</p>
+  <p class="note">Tap a team for its lineup. The strip under each team shows its chance of each finish this week, 1st on the left. Player ranges run from a low (10th percentile) to a high (90th percentile) final. Projected and odds come from <span id="srcs">the sims</span>; players in games underway keep their points so far plus a sim of the time left.</p>
 
   <h2>Win Odds This Week</h2>
   <svg class="chart" id="chart" viewBox="0 0 720 260"></svg>
@@ -138,6 +152,7 @@ async function loadScoreboard() {
       st.period > 4 ? 0 : Math.max(0, ((4 - st.period) * 900 + (st.clock || 0)) / GAME_SEC);
     return { id: e.id, away: teamCode(t.away.team.abbreviation), home: teamCode(t.home.team.abbreviation),
              kickoff: new Date(e.date).getTime(), state, frac, label: st.type.shortDetail,
+             period: st.period, clock: st.displayClock, half: st.type.name === "STATUS_HALFTIME",
              ascore: t.away.score, hscore: t.home.score };
   }).sort((a, b) => a.kickoff - b.kickoff);
 }
@@ -204,16 +219,28 @@ async function loadStats() {
 }
 
 // Replay: every game is final; a time slider replays the day with each game's points scaled by time played
+const clockSec = c => { const m = /^(\d+):(\d+)/.exec((c && c.displayValue) || ""); return m ? 60 * +m[1] + +m[2] : (c && c.value) || 0; };
+const mmss = x => `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, "0")}`;
 async function loadReplay() {
-  await Promise.all(games.map(async g => { finalBox[g.id] = scoreBox(await getJSON(`${ESPN}summary?event=${g.id}`)); }));
+  await Promise.all(games.map(async g => {
+    const sum = await getJSON(`${ESPN}summary?event=${g.id}`);
+    finalBox[g.id] = scoreBox(sum); g.fa = g.ascore; g.fh = g.hscore;
+    // the score through the day comes from the scoring plays (game seconds elapsed -> score after the play)
+    g.sp = (sum.scoringPlays || []).map(s => ({ t: ((s.period && s.period.number) - 1) * 900 + 900 - clockSec(s.clock), a: s.awayScore, h: s.homeScore }))
+      .sort((x, y) => x.t - y.t);
+  }));
 }
 function replayAt(T) {
   stats = {};
   for (const g of games) {
     const p = Math.min(1, Math.max(0, (T - g.kickoff) / REAL_GAME_MS));
-    g.frac = 1 - p; g.state = p === 0 ? "pre" : p === 1 ? "post" : "in"; g.hideScore = p < 1;
-    const q = Math.min(4, 1 + Math.floor(p * 4));
-    g.label = g.state === "pre" ? fmtKick(g.kickoff) : g.state === "post" ? "Final" : `Q${q}`;
+    g.frac = 1 - p; g.state = p === 0 ? "pre" : p === 1 ? "post" : "in";
+    const el = p * GAME_SEC, q = Math.min(4, 1 + Math.floor(el / 900));
+    g.period = q; g.clock = mmss(Math.max(0, q * 900 - el)); g.half = false;
+    if (g.state === "post") { g.ascore = g.fa; g.hscore = g.fh; }
+    else { let a = 0, h = 0; for (const s of g.sp || []) if (s.t <= el) { a = s.a; h = s.h; } g.ascore = a; g.hscore = h; }
+    g.hideScore = g.state === "in" && !(g.sp && g.sp.length);
+    g.label = g.state === "pre" ? fmtKick(g.kickoff) : g.state === "post" ? "Final" : `Q${q} ${g.clock}`;
     for (const [id, o] of Object.entries(finalBox[g.id] || {})) stats[id] = { ...o, pts: o.pts * p };
   }
 }
@@ -278,19 +305,22 @@ function runSims(withGames, nUse) {
     }
   }
   const win = new Float64Array(nT), top3 = new Float64Array(nT), top6 = new Float64Array(nT), ef1 = new Float64Array(nT), mean = new Float64Array(nT);
-  const rankOf = new Uint8Array(nT * N);
+  const rankOf = new Uint8Array(nT * N), rk = new Float64Array(nT * nT);
   const ord = [...Array(nT).keys()];
   for (let s = 0; s < N; s++) {
     ord.sort((a, b) => scores[b][s] - scores[a][s]);
     ord.forEach((t, r) => {
-      rankOf[t * N + s] = r;
+      rankOf[t * N + s] = r; rk[t * nT + r]++;
       if (r === 0) win[t]++; if (r < 3) top3[t]++; if (r < 6) top6[t]++;
       ef1[t] += L.f1[r] || 0; mean[t] += scores[t][s];
     });
   }
   const res = T.map((t, i) => {
     const vals = now[i].map(n => n.pts);
-    return { team: t, ps: teamPs[i], now: now[i], slot: lineupNow(teamPs[i], vals), cur: bestBall(vals, teamPs[i].map(p => p.pos)),
+    const srt = Float32Array.from(scores[i]).sort(), cnt = rk.subarray(i * nT, (i + 1) * nT);
+    let c = 0, r10 = -1, r90 = -1, mode = 0;
+    for (let r = 0; r < nT; r++) { c += cnt[r]; if (r10 < 0 && c >= .1 * N) r10 = r; if (r90 < 0 && c >= .9 * N) r90 = r; if (cnt[r] > cnt[mode]) mode = r; }
+    return { rk: Array.from(cnt, x => x / N), mode, r10, r90, lo: srt[Math.floor(.1 * (N - 1))], hi: srt[Math.floor(.9 * (N - 1))], team: t, ps: teamPs[i], now: now[i], slot: lineupNow(teamPs[i], vals), cur: bestBall(vals, teamPs[i].map(p => p.pos)),
              mean: mean[i] / N, win: 100 * win[i] / N, top3: 100 * top3[i] / N, top6: 100 * top6[i] / N, ef1: ef1[i] / N,
              left: now[i].filter((n, j) => n.state === "pre" && teamPs[i][j].proj > 0).length,
              playing: now[i].filter((n, j) => n.state === "in" && teamPs[i][j].proj > 0).length };
@@ -326,13 +356,25 @@ function gameSwings(teamPs, now, rankOf, N, NR) {
 
 // ---------- render ----------
 const fmtKick = t => new Date(t).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
-function stLabel(n, p) {
-  if (n.state === "bye") return '<span class="st">Bye</span>';
-  const g = p.game;
-  if (n.state === "pre") return `<span class="st">${esc(fmtKick(g.kickoff))}</span>`;
-  if (n.state === "post") return '<span class="st">Final</span>';
-  return `<span class="st live">${esc(g.label)}</span>`;
+const ordn = n => n + ((n % 100 >= 11 && n % 100 <= 13) ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th"));
+function teamScore(g, team) {   // "BUF 17-10": the player's team first
+  if (g.hideScore || g.ascore == null) return "";
+  const home = team === g.home;
+  return ` · ${team} ${home ? g.hscore : g.ascore}-${home ? g.ascore : g.hscore}`;
 }
+const gameClock = g => g.half ? "Half" : g.period > 4 ? `OT ${g.clock || ""}` : `Q${g.period} ${g.clock || ""}`;
+function stLabel(n, p) {
+  if (n.state === "bye") return '<span class="st s2">Bye</span>';
+  const g = p.game;
+  if (n.state === "pre") return `<span class="st s2">○ To play · ${esc(fmtKick(g.kickoff))}</span>`;
+  if (n.state === "post") return `<span class="st s2">Final${esc(teamScore(g, p.nfl))}</span>`;
+  return `<span class="st s2 live">● Playing · ${esc(gameClock(g).trim())}${esc(teamScore(g, p.nfl))}</span>`;
+}
+function rankStrip(r) {
+  const mx = Math.max(...r.rk, 1e-9);
+  return '<span class="strip">' + r.rk.map((x, k) => `<i title="${ordn(k + 1)}: ${pct(100 * x)}"${x > 0 ? ` style="background:rgba(232,197,71,${(.12 + .88 * x / mx).toFixed(2)})"` : ""}></i>`).join("") + "</span>";
+}
+function syncToggle() { $("toggle").textContent = openTeams.size >= L.teams.length ? "Hide lineups" : "Show all lineups"; }
 let openTeams = new Set();
 
 function render(res) {
@@ -343,13 +385,14 @@ function render(res) {
     const t = r.team, open = openTeams.has(t.id);
     const left = r.playing || r.left ? `${r.playing ? r.playing + " playing · " : ""}${r.left} to play` : "done";
     h += `<tr class="team${k === 0 ? " first" : ""}${open ? " open" : ""}" data-id="${esc(t.id)}">
-      <td class="pos">${k + 1}</td><td class="l name"><b>${esc(t.name)}</b><span>${esc(t.franchise)} · ${left}</span></td>
+      <td class="pos">${k + 1}</td><td class="l name"><b>${esc(t.name)}</b><span>${esc(t.franchise)} · ${left}</span>
+      <span class="fin">Likely finish ${ordn(r.mode + 1)} · range ${ordn(r.r10 + 1)}–${ordn(r.r90 + 1)}</span>${rankStrip(r)}</td>
       <td class="big">${f1(r.cur)}</td><td class="dim">${f1(r.mean)}</td>
       <td>${pct(r.win)}<span class="bar hide-sm" style="width:${(2.2 * r.win / maxW).toFixed(2)}rem"></span></td>
       <td class="hide-sm">${pct(r.top3)}</td><td>${pct(r.top6)}</td><td>${r.ef1.toFixed(1)}</td></tr>`;
     if (open) h += `<tr class="detail"><td colspan="8">${playersTable(r)}</td></tr>`;
   });
-  $("board").innerHTML = h;
+  $("board").innerHTML = h; syncToggle();
   document.querySelectorAll("tr.team").forEach(tr => tr.onclick = () => {
     const id = tr.dataset.id; openTeams.has(id) ? openTeams.delete(id) : openTeams.add(id); render(LAST);
   });
@@ -385,19 +428,39 @@ function render(res) {
   renderChart(res);
 }
 
-function playersTable(r) {
-  const order = { QB: 0, RB: 1, WR: 2, TE: 3, FLEX: 4 };
-  const idx = r.ps.map((p, i) => i).sort((a, b) =>
-    (r.slot[a] ? 0 : 1) - (r.slot[b] ? 0 : 1) || (order[r.slot[a] || r.ps[a].pos] - order[r.slot[b] || r.ps[b].pos]) ||
-    r.now[b].pts - r.now[a].pts || r.ps[b].proj - r.ps[a].proj);
-  let h = '<table class="pl">';
-  for (const i of idx) {
-    const p = r.ps[i], n = r.now[i], on = !!r.slot[i];
-    if (!on && p.proj <= 0 && n.pts === 0) continue;   // hide out / inactive bench
-    h += `<tr class="${on ? "" : "bench"}"><td class="slot">${on ? "● " + r.slot[i] : p.pos}</td>
-      <td class="l">${esc(p.name)} <span class="st">${esc(p.nfl)}</span></td><td>${stLabel(n, p)}</td>
-      <td>${n.state === "pre" || n.state === "bye" ? '<span class="dim">' + f1(p.proj) + "</span>" : f1(n.pts)}</td></tr>`;
+// a player's final: points so far plus the draw for the time left (draw quantiles are precomputed per row)
+let QLO, QHI, QMU;
+function drawQuantiles() {
+  const NR = L.nsim, rows = D.length / NR; QLO = new Float32Array(rows); QHI = new Float32Array(rows); QMU = new Float32Array(rows);
+  const buf = new Float32Array(NR);
+  for (let k = 0; k < rows; k++) {
+    let sum = 0; for (let s = 0; s < NR; s++) { buf[s] = D[k * NR + s] / 10; sum += buf[s]; }
+    buf.sort(); QLO[k] = buf[Math.floor(.1 * (NR - 1))]; QHI[k] = buf[Math.floor(.9 * (NR - 1))]; QMU[k] = sum / NR;
   }
+}
+function finalDist(p, n) {
+  if (p.row == null) return { mu: n.pts, lo: n.pts, hi: n.pts };
+  const f = n.state === "bye" ? 1 : n.frac, b = n.state === "bye" ? 0 : n.pts;
+  return { mu: b + QMU[p.row] * f, lo: b + QLO[p.row] * f, hi: b + QHI[p.row] * f };
+}
+const SLOT_ORDER = { QB: 0, RB: 1, WR: 2, TE: 3, FLEX: 4 };
+function playersTable(r) {
+  const shown = r.ps.map((p, i) => i).filter(i => r.slot[i] || r.ps[i].proj > 0 || r.now[i].pts !== 0);
+  const by = (a, b, sa, sb) => SLOT_ORDER[sa] - SLOT_ORDER[sb] || r.now[b].pts - r.now[a].pts || r.ps[b].proj - r.ps[a].proj;
+  const starters = shown.filter(i => r.slot[i]).sort((a, b) => by(a, b, r.slot[a], r.slot[b]));
+  const bench = shown.filter(i => !r.slot[i]).sort((a, b) => by(a, b, r.ps[a].pos, r.ps[b].pos));
+  const live = shown.filter(i => r.now[i].state !== "bye"), cnt = st => live.filter(i => r.now[i].state === st).length;
+  const sum = [`Now ${f1(r.cur)}`, `Proj ${f1(r.mean)}`, `range ${Math.round(r.lo)}–${Math.round(r.hi)}`,
+    `${cnt("in")} playing`, `${cnt("pre")} to play`, `${cnt("post")} done`].join(" · ");
+  const row = (i, on) => {
+    const p = r.ps[i], n = r.now[i], fd = finalDist(p, n), pre = n.state === "pre" || n.state === "bye";
+    return `<tr${on ? "" : ' class="bench"'}><td class="slot">${on ? r.slot[i] : p.pos}</td>
+      <td class="pn">${esc(p.name)} <span class="st">${esc(p.nfl)}</span>${stLabel(n, p)}</td>
+      <td>${pre ? '<span class="dim">–</span>' : f1(n.pts)}</td><td>${f1(fd.mu)}</td><td class="rg">${Math.round(fd.lo)}–${Math.round(fd.hi)}</td></tr>`;
+  };
+  const head = t => `<tr class="grp"><td class="gl" colspan="2">${t}</td><td>Now</td><td>Proj</td><td>Range</td></tr>`;
+  let h = `<div class="tsum">${sum}</div><table class="pl">` + head("In the lineup") + starters.map(i => row(i, true)).join("");
+  if (bench.length) h += head("Bench") + bench.map(i => row(i, false)).join("");
   return h + "</table>";
 }
 
@@ -503,7 +566,9 @@ async function startReplay() {
     const cur = Q.get("week") ? { week: +Q.get("week") } : await getJSON("current.json");
     const ww = String(cur.week).padStart(2, "0");
     const [l, bin] = await Promise.all([getJSON(`week-${ww}.json`), fetch(`week-${ww}.bin`, { cache: "no-store" }).then(r => r.arrayBuffer())]);
-    L = l; D = new Int16Array(bin);
+    L = l; D = new Int16Array(bin); drawQuantiles();
+    $("toggle").onclick = () => { if (openTeams.size >= L.teams.length) openTeams.clear(); else L.teams.forEach(t => openTeams.add(t.id));
+      if (LAST) render(LAST); else syncToggle(); };
     $("title").textContent = `Week ${L.week} Live`;
     $("srcs").textContent = L.sources;
     document.title = `F1C Week ${L.week} Live`;
