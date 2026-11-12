@@ -73,7 +73,19 @@ td.name span.strip { display:flex; gap:1px; width:6.6rem; margin-top:.3rem; }
 .pl td.pn { white-space:normal; text-align:left; }
 .pl td.pn .st.s2 { display:block; }
 .pl td.rg { font-size:.7rem; color:var(--faint); }
-.pl tr.bench td.rg, .pl tr.bench .st { color:#4a4a4a; }
+.pl tr.bench { opacity:.55; }
+.pl tr.s-in td { background:rgba(229,72,77,.07); }
+.pl tr.s-in td.slot { box-shadow:inset 3px 0 0 #e5484d; }
+.pl tr.s-post td.slot { box-shadow:inset 3px 0 0 rgba(76,195,138,.6); }
+.pl tr.s-pre td.slot { box-shadow:inset 3px 0 0 #3a3a3a; }
+.pl tr.s-in td.now { color:#fff; font-weight:700; }
+.pl tr.s-post td.now { color:var(--fg); }
+.pl tr.s-pre td.proj { color:#fff; font-weight:600; }
+.pl .st.done, .lg .c-post { color:#5fae86; }
+.pl .st.up, .lg .c-pre { color:var(--muted); }
+.lg .c-in { color:var(--live); }
+.lg { font-size:.68rem; padding:.15rem .6rem 0; display:flex; gap:.9rem; text-align:left; }
+.pd { display:inline-block; width:.42rem; height:.42rem; border-radius:50%; background:var(--live); margin-right:.3rem; vertical-align:.05rem; animation:pulse 1.6s infinite; }
 .hide-sm { }
 @media (max-width:520px) { .hide-sm { display:none; } td, th { padding-left:.2rem; padding-right:.2rem; } h1 { font-size:1.6rem; } }
 </style>
@@ -366,9 +378,9 @@ const gameClock = g => g.half ? "Half" : g.period > 4 ? `OT ${g.clock || ""}` : 
 function stLabel(n, p) {
   if (n.state === "bye") return '<span class="st s2">Bye</span>';
   const g = p.game;
-  if (n.state === "pre") return `<span class="st s2">○ To play · ${esc(fmtKick(g.kickoff))}</span>`;
-  if (n.state === "post") return `<span class="st s2">Final${esc(teamScore(g, p.nfl))}</span>`;
-  return `<span class="st s2 live">● Playing · ${esc(gameClock(g).trim())}${esc(teamScore(g, p.nfl))}</span>`;
+  if (n.state === "pre") return `<span class="st s2 up">To play · ${esc(fmtKick(g.kickoff))}</span>`;
+  if (n.state === "post") return `<span class="st s2 done">Final${esc(teamScore(g, p.nfl))}</span>`;
+  return `<span class="st s2 live"><i class="pd"></i>Playing · ${esc(gameClock(g).trim())}${esc(teamScore(g, p.nfl))}</span>`;
 }
 function rankStrip(r) {
   const mx = Math.max(...r.rk, 1e-9);
@@ -454,12 +466,13 @@ function playersTable(r) {
     `${cnt("in")} playing`, `${cnt("pre")} to play`, `${cnt("post")} done`].join(" · ");
   const row = (i, on) => {
     const p = r.ps[i], n = r.now[i], fd = finalDist(p, n), pre = n.state === "pre" || n.state === "bye";
-    return `<tr${on ? "" : ' class="bench"'}><td class="slot">${on ? r.slot[i] : p.pos}</td>
+    const sc = { in: "s-in", post: "s-post", pre: "s-pre" }[n.state] || "";
+    return `<tr class="${on ? "" : "bench "}${sc}"><td class="slot">${on ? r.slot[i] : p.pos}</td>
       <td class="pn">${esc(p.name)} <span class="st">${esc(p.nfl)}</span>${stLabel(n, p)}</td>
-      <td>${pre ? '<span class="dim">–</span>' : f1(n.pts)}</td><td>${f1(fd.mu)}</td><td class="rg">${Math.round(fd.lo)}–${Math.round(fd.hi)}</td></tr>`;
+      <td class="now">${pre ? '<span class="dim">–</span>' : f1(n.pts)}</td><td class="proj">${f1(fd.mu)}</td><td class="rg">${Math.round(fd.lo)}–${Math.round(fd.hi)}</td></tr>`;
   };
   const head = t => `<tr class="grp"><td class="gl" colspan="2">${t}</td><td>Now</td><td>Proj</td><td>Range</td></tr>`;
-  let h = `<div class="tsum">${sum}</div><table class="pl">` + head("In the lineup") + starters.map(i => row(i, true)).join("");
+  let h = `<div class="tsum">${sum}</div><div class="lg"><span class="c-in">● Live</span><span class="c-post">● Final</span><span class="c-pre">● To play</span></div><table class="pl">` + head("In the lineup") + starters.map(i => row(i, true)).join("");
   if (bench.length) h += head("Bench") + bench.map(i => row(i, false)).join("");
   return h + "</table>";
 }
