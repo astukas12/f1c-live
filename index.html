@@ -51,6 +51,9 @@ tr.detail td { padding:0 0 .8rem; background:#0d0d0d; }
 .st.live { color:var(--live); font-weight:600; }
 .bar { display:inline-block; height:.42rem; border-radius:2px; background:var(--gold); vertical-align:middle; margin-left:.3rem; opacity:.85; }
 .chart { width:100%; height:auto; display:block; }
+.chart .ln, .chart .lab { transition:opacity .15s; cursor:pointer; }
+.chart.hl .ln:not(.on), .chart.hl .lab:not(.on) { opacity:.12; }
+.chart .hit { stroke:transparent; stroke-width:12; fill:none; cursor:pointer; }
 .legend { display:flex; flex-wrap:wrap; gap:.3rem .9rem; font-size:.74rem; color:var(--muted); margin-top:.4rem; }
 .legend i { display:inline-block; width:.8rem; height:.18rem; border-radius:1px; margin-right:.3rem; vertical-align:middle; }
 .replay { background:var(--card); border:1px solid #262626; border-radius:10px; padding:.7rem .9rem; margin-top:1rem; font-size:.8rem; }
@@ -113,7 +116,7 @@ td.name span.strip { display:flex; gap:1px; width:6.6rem; margin-top:.3rem; }
 
   <h2>Expected F1 Points This Week</h2>
   <svg class="chart" id="chart2" viewBox="0 0 720 260"></svg>
-  <p class="note">Each team's average F1 points this week across the sims, at each update.</p>
+  <p class="note" id="chartnote2">Each team's average F1 points this week across the sims. Tap a line or name to pick out a team.</p>
 
   <h2>Games That Matter</h2>
   <table id="games"></table>
@@ -140,6 +143,7 @@ const GAME_SEC = 3600, REAL_GAME_MS = 3.2 * 3600e3;
 const Q = new URLSearchParams(location.search);
 const REPLAY = Q.get("replay") === "1";
 let MODEL = Q.get("model") === "simple" ? "simple" : "smart";   // ?model=simple: points so far + pre-game sim x time left
+const TEAM_COLORS = ["#E8C547", "#5aa9e6", "#4cc38a", "#c58af9", "#f08c3a", "#7dd3c0", "#e88fb0", "#a3b86c", "#8c9eff", "#d4a373", "#b0b6bd", "#ef8f7b"];
 const COLORS = ["#E8C547", "#4cc38a", "#5aa9e6", "#e5484d", "#c58af9", "#f08c3a"];
 
 let L, D;                  // week data, Int16 draws (tenths)
@@ -379,7 +383,7 @@ function playerNow(p) {
   if (!g) return { pts: 0, frac: 0, state: "bye", m: 1, tag: "" };
   const u = g.ps && !p.pkeyLost && g.ps.pl[tm + "|" + plKey(s ? s.name : p.name)];
   const n = { pts: s ? s.pts : 0, frac: g.frac, state: g.state, st: s && s.st, u, m: 1, tag: "", g, tm };
-  if (REPLAY && g.state === "in") { n.pts = u ? u.pts : 0; n.st = u ? u.st : null; }
+  if ((REPLAY || HIST) && g.state === "in") { n.pts = u ? u.pts : 0; n.st = u ? u.st : null; }
   if (!REPLAY && g.state === "post" && MFL && MFL.players && MFL.players[p.id] != null) { n.espnPts = n.pts; n.pts = +MFL.players[p.id]; n.mfl = true; }
   if (MODEL === "smart") adjust(p, n, s, g);
   return n;
@@ -696,19 +700,23 @@ function pushHistory(t, res) {
   saveHistory();
 }
 function renderChart(res) {
-  // team colours follow the win-odds order, so a team is the same colour in both charts
+  // win odds: the contenders in colour (by win order), the rest grey; expected F1: every team its own colour and label
   const lead = [...res].sort((a, b) => b.win - a.win).slice(0, COLORS.length).filter(r => r.win >= 1 || history.some(h => (h.w[r.team.id] || 0) >= 5));
   const col = {}; lead.forEach((r, i) => col[r.team.id] = COLORS[i]);
   drawChart($("chart"), history, "w", col, v => pct(v), vmax => Math.min(100, Math.max(20, vmax) * 1.08), [0, 25, 50, 75, 100], v => v + "%");
+  const all = {}; L.teams.forEach((t, i) => all[t.id] = TEAM_COLORS[i % TEAM_COLORS.length]);
   const he = history.filter(h => h.e), emax = Math.max(1, ...he.flatMap(h => Object.values(h.e)));
   const step = emax > 30 ? 10 : emax > 12 ? 5 : 2;
-  drawChart($("chart2"), he, "e", col, v => v.toFixed(1), vmax => vmax * 1.08, Array.from({ length: Math.floor(emax * 1.08 / step) + 1 }, (_, k) => k * step), v => String(v));
+  drawChart($("chart2"), he, "e", all, v => v.toFixed(1), vmax => vmax * 1.08, Array.from({ length: Math.floor(emax * 1.08 / step) + 1 }, (_, k) => k * step), v => String(v), 320);
   $("legend").innerHTML = "";
-  $("chartnote").textContent = REPLAY ? "Replay of the day in 15-minute steps." :
-    "Starts from the pre-game sims; this page adds a point each time it updates while open.";
+  $("chartnote").textContent = REPLAY ? "Replay of the day in 15-minute steps." : HIST_NOTE;
 }
-function drawChart(svg, hist, k, col, fmt, ymaxOf, grid, gfmt) {
-  const W = 720, H = 260, m = { l: 34, r: 96, t: 10, b: 24 };
+let HIST_NOTE = "Starts from the pre-game sims; this page adds a point each time it updates while open.";
+const chartSel = {};   // svg id -> team picked out by a tap
+function drawChart(svg, hist, k, col, fmt, ymaxOf, grid, gfmt, Hh) {
+  // drawn in real pixels so the text stays readable on a phone
+  const W = Math.max(320, Math.round(svg.getBoundingClientRect().width) || 720), H = Hh || 260, m = { l: 34, r: 104, t: 10, b: 24 };
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   if (hist.length < 2) { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" fill="#5c5c5c" font-size="13" text-anchor="middle">The line fills in as games are played</text>`; return; }
   // points sit evenly by position in the history, not by clock time, so Thu/Sun/Mon each get room;
   // in replay the axis spans the whole replay while the line stops at the slider
@@ -717,19 +725,72 @@ function drawChart(svg, hist, k, col, fmt, ymaxOf, grid, gfmt) {
   const x = i => m.l + (W - m.l - m.r) * i / Math.max(1, nA - 1), y = v => m.t + (H - m.t - m.b) * (1 - v / ymax);
   let s = "";
   for (const v of grid.filter(v => v <= ymax)) s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="#1f1f1f"/><text x="${m.l - 6}" y="${y(v) + 4}" fill="#5c5c5c" font-size="11" text-anchor="end">${gfmt(v)}</text>`;
-  const ticks = Math.min(4, nA - 1); for (let j = 0; j <= ticks; j++) { const i = Math.round((nA - 1) * j / ticks);
+  const ticks = Math.min(W < 500 ? 2 : 4, nA - 1); for (let j = 0; j <= ticks; j++) { const i = Math.round((nA - 1) * j / ticks);
     s += `<text x="${x(i)}" y="${H - 6}" fill="#5c5c5c" font-size="11" text-anchor="${j === 0 ? "start" : j === ticks ? "end" : "middle"}">${esc(new Date(axis[i].t).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }))}</text>`; }
   const ids = L.teams.map(t => t.id).sort((a, b) => (col[a] ? 1 : 0) - (col[b] ? 1 : 0));
   const labels = [];
   for (const id of ids) {
     const pts = hist.map((h, i) => `${x(i).toFixed(1)},${y(h[k][id] || 0).toFixed(1)}`).join(" ");
-    s += `<polyline points="${pts}" fill="none" stroke="${col[id] || "#333"}" stroke-width="${col[id] ? 2.2 : 1.2}" stroke-linejoin="round"/>`;
+    s += `<polyline class="ln" data-id="${esc(id)}" points="${pts}" fill="none" stroke="${col[id] || "#333"}" stroke-width="${col[id] ? 2 : 1.2}" stroke-linejoin="round"/>` +
+         (col[id] ? `<polyline class="hit" data-id="${esc(id)}" points="${pts}"/>` : "");
     if (col[id]) labels.push({ id, v: hist[hist.length - 1][k][id] || 0 });
   }
-  labels.sort((a, b) => b.v - a.v); let lastY = -99;
-  for (const l of labels) { const yy = Math.max(y(l.v) + 4, lastY + 13); lastY = yy;
-    s += `<text x="${W - m.r + 6}" y="${yy}" fill="${col[l.id]}" font-size="11.5" font-weight="600">${esc(L.teams.find(t => t.id === l.id).name)} ${fmt(l.v)}</text>`; }
+  // end labels: in value order, at least 13px apart, kept inside the plot
+  labels.sort((a, b) => b.v - a.v);
+  const gap = 13, top = m.t + 4, bot = H - m.b + 2;
+  labels.forEach((l, i) => l.y = Math.max(y(l.v) + 4, i ? labels[i - 1].y + gap : top));
+  for (let i = labels.length - 1; i >= 0; i--) labels[i].y = Math.min(labels[i].y, i === labels.length - 1 ? bot : labels[i + 1].y - gap);
+  for (const l of labels) s += `<text class="lab" data-id="${esc(l.id)}" x="${W - m.r + 6}" y="${l.y.toFixed(1)}" fill="${col[l.id]}" font-size="11" font-weight="600">${esc(L.teams.find(t => t.id === l.id).name)} ${fmt(l.v)}</text>`;
   svg.innerHTML = s;
+  const pick = id => { svg.classList.toggle("hl", !!id); svg.querySelectorAll(".ln,.lab").forEach(e => e.classList.toggle("on", e.dataset.id === id)); };
+  pick(chartSel[svg.id]);
+  svg.onclick = ev => { const id = ev.target.dataset && ev.target.dataset.id; chartSel[svg.id] = id && id !== chartSel[svg.id] ? id : null; pick(chartSel[svg.id]); };
+  svg.onmouseover = ev => { const id = ev.target.dataset && ev.target.dataset.id; if (id && col[id]) pick(id); };
+  svg.onmouseout = () => pick(chartSel[svg.id]);
+}
+
+// Live mode: rebuild the week's history from play-by-play (every game that has started, 15-minute steps while a game
+// was on, 1,000 sims a step), so every viewer gets the same full chart. Uses the current projections and sims.
+let HIST = false, backfilling = false;
+function stateAt(T) {
+  stats = {};
+  for (const g of games) {
+    const live = g._live;
+    let p = live.state === "pre" ? 0 : Math.min(1, Math.max(0, (T - g.kickoff) / REAL_GAME_MS));
+    if (live.state !== "post") p = Math.min(p, .99);
+    g.frac = 1 - p; g.state = p === 0 ? "pre" : p === 1 ? "post" : "in";
+    g.ps = g.pbp ? pbpState(g, p === 1 ? Infinity : p * GAME_SEC) : null;
+    if (g.state === "post") Object.assign(stats, finalBox[g.id] || {});
+  }
+}
+async function backfill() {
+  const started = games.filter(g => g.state !== "pre");
+  if (REPLAY || !started.length || started.some(g => !g.pbp)) return;   // no play-by-play: keep this device's own history
+  backfilling = true;
+  const keep = ["state", "frac", "ps"], st0 = stats;
+  games.forEach(g => { g._live = Object.fromEntries(keep.map(k => [k, g[k]])); });
+  try {
+    const step = 15 * 60e3, now = Date.now(), set = new Set();
+    for (const g of started) for (let T = g.kickoff; T <= Math.min(now, g.kickoff + REAL_GAME_MS); T += step) set.add(T);
+    const steps = [...set].sort((a, b) => a - b), hist = [];
+    const pg = pregame(), w0 = {}, e0 = {}; pg.forEach(r => { w0[r.team.id] = +r.win.toFixed(1); e0[r.team.id] = +r.ef1.toFixed(2); });
+    hist.push({ t: games[0].kickoff - 60e3, w: w0, e: e0 });
+    HIST = true;
+    for (let k = 0; k < steps.length; k++) {
+      stateAt(steps[k]); indexNames(); const r = runSims(false, 1000);
+      const w = {}, e = {}; r.forEach(x => { w[x.team.id] = +x.win.toFixed(1); e[x.team.id] = +x.ef1.toFixed(2); }); hist.push({ t: steps[k], w, e });
+      if (k % 6 === 5) await new Promise(res => setTimeout(res, 0));
+    }
+    const last = steps[steps.length - 1] || 0;
+    history = [...hist, ...history.filter(h => h.t > last + 60e3 && h.e)];
+    HIST_NOTE = "Rebuilt from the play-by-play every 15 minutes while games were on (using the current projections and sims), then a point each update.";
+  } catch (e) { console.warn("backfill", e); }
+  finally {
+    HIST = false;
+    games.forEach(g => { Object.assign(g, g._live); delete g._live; }); stats = st0; indexNames();
+    backfilling = false;
+  }
+  if (LAST) render(LAST);
 }
 
 // ---------- main loop ----------
@@ -757,6 +818,7 @@ async function dataChanged() {
 // before the next kickoff, or until the page is opened or shown again.
 let lastDataCheck = Date.now(), nextTickAt = 0, ticking = false;
 async function tick() {
+  if (backfilling) { clearTimeout(timer); timer = setTimeout(tick, 5e3); return; }
   if (ticking) return; ticking = true; clearTimeout(timer);
   try {
     if (Date.now() - lastDataCheck > 10 * 60e3) { lastDataCheck = Date.now(); if (await dataChanged()) { location.reload(); return; } }
@@ -835,6 +897,8 @@ async function startReplay() {
       history.unshift({ t: Math.min(games[0].kickoff, Date.now()) - 60e3, w, e });
     }
     await tick();
+    performance.mark("board");
+    await backfill(); performance.mark("history");
   } catch (e) { console.error(e); $("err").innerHTML = `<div class="err">Couldn't load the live page (${esc(e.message)}).</div>`; }
 })();
 </script>
