@@ -11,16 +11,68 @@
 :root { --bg:#0a0a0a; --fg:#e8e8e8; --gold:#E8C547; --muted:#8a8a8a; --faint:#5c5c5c; --line:#1f1f1f; --card:#111;
         --down:#e5484d; --live:#E8C547; --soon:#5aa9e6; --done:#9a9a9a; }
 * { box-sizing: border-box; }
-html { color-scheme: dark; }
+html { color-scheme: dark; scroll-behavior: smooth; }
 body { margin:0; background:var(--bg); color:var(--fg); font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
        font-feature-settings:"tnum" 1; letter-spacing:-.005em; line-height:1.45; }
 a { color:var(--gold); text-decoration:none; }
-nav { border-bottom:1px solid var(--line); padding:.7rem 16px; display:flex; gap:1rem; align-items:center; font-size:.85rem; }
-nav b { color:#fff; font-weight:700; margin-right:auto; }
+/* app shell: sticky top bar, scoreboard strip, sticky section tabs */
+.top { position:sticky; top:0; z-index:30; height:48px; background:rgba(10,10,10,.94); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); border-bottom:1px solid var(--line); }
+.top .in { max-width:760px; margin:0 auto; height:100%; padding:0 16px; display:flex; align-items:center; gap:.6rem; font-size:.85rem; }
+.top b { color:#fff; font-weight:800; letter-spacing:-.01em; font-size:.98rem; white-space:nowrap; }
+.top .wk { color:var(--muted); font-weight:600; white-space:nowrap; }
+.top .pill { margin-left:auto; display:flex; align-items:center; gap:.35rem; font-size:.72rem; color:var(--muted); white-space:nowrap; }
+.top .pill .dot { margin:0; }
+.top a.lk { font-size:.74rem; white-space:nowrap; min-height:40px; display:flex; align-items:center; }
+.sb { max-width:760px; margin:0 auto; display:flex; gap:.5rem; overflow-x:auto; padding:.7rem 16px .55rem; scrollbar-width:none; scroll-snap-type:x proximity; }
+.sb::-webkit-scrollbar { display:none; }
+.gm { flex:0 0 auto; min-width:7.6rem; scroll-snap-align:start; background:var(--card); border:1px solid #1f1f1f; border-radius:10px; padding:.45rem .55rem; color:var(--fg); font:inherit; text-align:left; cursor:pointer; }
+.gm .gr { display:flex; align-items:center; justify-content:space-between; gap:.5rem; font-size:.8rem; line-height:1.55; }
+.gm .gr b { font-weight:700; color:#fff; }
+.gm .gs { font-size:.66rem; color:var(--faint); margin-top:.15rem; font-weight:600; }
+.gm.in { border-color:rgba(232,197,71,.5); } .gm.in .gs { color:var(--live); }
+.gm.pre .gs { color:var(--soon); }
+.gm.post .gr b { color:var(--muted); font-weight:600; }
+.gm.sel { border-color:#d8d8d8; }
+.tabs { position:sticky; top:48px; z-index:29; background:rgba(10,10,10,.94); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); border-bottom:1px solid var(--line); }
+.tabs .in { max-width:760px; margin:0 auto; display:flex; gap:.2rem; overflow-x:auto; padding:0 12px; scrollbar-width:none; }
+.tabs .in::-webkit-scrollbar { display:none; }
+.tabs a { flex:0 0 auto; min-height:40px; display:flex; align-items:center; padding:0 .65rem; color:var(--muted); font-size:.8rem; font-weight:600; border-bottom:2px solid transparent; }
+.tabs a.on { color:#fff; border-bottom-color:var(--gold); }
+section { scroll-margin-top:100px; }
 main { max-width:760px; margin:0 auto; padding:0 16px 3rem; }
-h1 { font-size:2rem; font-weight:700; color:#fff; letter-spacing:-.02em; margin:1.6rem 0 .1rem; }
+/* NFL team badges: team colours, abbreviation only */
+.tbg { display:inline-block; min-width:2.1rem; text-align:center; font-size:.62rem; font-weight:800; letter-spacing:.04em; border-radius:4px; padding:.06rem .3rem; line-height:1.35; vertical-align:.08rem; border:1px solid rgba(255,255,255,.16); }
+/* standings cards */
+.cards { display:flex; flex-direction:column; gap:.55rem; }
+.card { background:var(--card); border:1px solid #1d1d1d; border-radius:12px; overflow:hidden; }
+.card .hd { padding:.75rem .85rem .7rem; cursor:pointer; }
+.card .ch { display:grid; grid-template-columns:1.6rem 1fr auto; gap:.45rem; align-items:start; }
+.card .rk { color:var(--muted); font-weight:700; font-size:.95rem; line-height:1.4; }
+.card .tn b { color:#fff; font-weight:600; font-size:.98rem; }
+.card .tn b::after { content:" ▸"; color:var(--faint); font-size:.7rem; }
+.card.open .tn b::after { content:" ▾"; }
+.card .tn span { display:block; color:var(--faint); font-size:.74rem; }
+.card .tn span.fin { color:var(--muted); }
+.card .tn .strip { display:flex; gap:1px; width:7.2rem; margin-top:.35rem; }
+.card .nv { text-align:right; }
+.card .nv b { display:block; font-size:1.35rem; color:#fff; font-weight:700; line-height:1.15; border-radius:4px; }
+.card .nv small { color:var(--muted); font-size:.72rem; }
+.card .cs { display:grid; grid-template-columns:repeat(4, 1fr); gap:.4rem; margin:.6rem 0 0 2.05rem; }
+.card .cs div { font-size:.9rem; font-weight:600; color:var(--fg); }
+.card .cs i { display:block; font-style:normal; font-size:.58rem; text-transform:uppercase; letter-spacing:.08em; color:var(--faint); font-weight:600; }
+.card .detail { border-top:1px solid #1d1d1d; background:#0d0d0d; padding-bottom:.3rem; }
+/* skeletons, flashes */
+.sk { height:5.6rem; border-radius:12px; background:linear-gradient(90deg,#101010 0%,#171717 50%,#101010 100%); background-size:200% 100%; animation:sk 1.2s infinite linear; }
+@keyframes sk { to { background-position:-200% 0; } }
+.flash { animation:fl 1.4s ease-out; }
+tr.flash td { animation:fl 1.4s ease-out; }
+@keyframes fl { from { background-color:rgba(232,197,71,.22); } to { background-color:transparent; } }
+.pick td { background:rgba(255,255,255,.05) !important; }
+.chip.pick { border-color:#d8d8d8; }
+footer.app { margin-top:2.6rem; padding-top:1rem; border-top:1px solid var(--line); }
+
 .sub { color:var(--muted); font-size:.9rem; }
-.status { display:flex; flex-wrap:wrap; gap:.4rem .9rem; align-items:center; margin:.7rem 0 0; font-size:.8rem; color:var(--muted); }
+.status { display:flex; flex-wrap:wrap; gap:.3rem .9rem; align-items:center; margin:.2rem 0 0; font-size:.76rem; color:var(--muted); }
 .dot { display:inline-block; width:.5rem; height:.5rem; border-radius:50%; background:var(--live); margin-right:.35rem; animation:pulse 1.6s infinite; }
 .dot.off { background:var(--faint); animation:none; }
 @keyframes pulse { 50% { opacity:.3; } }
@@ -58,7 +110,7 @@ tr.detail td { padding:0 0 .8rem; background:#0d0d0d; }
 .legend i { display:inline-block; width:.8rem; height:.18rem; border-radius:1px; margin-right:.3rem; vertical-align:middle; }
 .replay { background:var(--card); border:1px solid #262626; border-radius:10px; padding:.7rem .9rem; margin-top:1rem; font-size:.8rem; }
 .replay input { width:100%; accent-color:var(--gold); }
-.gts { margin:2.4rem 0 0; border:1px solid #2a2510; background:#100f09; border-radius:10px; padding:.7rem .9rem; display:flex; gap:.8rem; align-items:center; }
+.gts { margin:1rem 0 0; border:1px solid #2a2510; background:#100f09; border-radius:10px; padding:.7rem .9rem; display:flex; gap:.8rem; align-items:center; }
 .gts .k { font-size:.58rem; color:var(--gold); letter-spacing:.14em; text-transform:uppercase; font-weight:700; }
 .gts .t { color:#fff; font-size:.84rem; font-weight:600; }
 .gts .s { color:var(--muted); font-size:.72rem; }
@@ -68,7 +120,7 @@ td.name span.fin { color:var(--muted); }
 td.name span.strip { display:flex; gap:1px; width:6.6rem; margin-top:.3rem; }
 .strip i { flex:1; height:.32rem; background:#1c1c1c; border-radius:1px; }
 .tools { margin:0 0 .5rem; }
-.btn { background:var(--card); border:1px solid #2a2a2a; color:var(--fg); font:inherit; font-size:.74rem; padding:.3rem .75rem; border-radius:6px; cursor:pointer; }
+.btn { background:var(--card); border:1px solid #2a2a2a; color:var(--fg); font:inherit; font-size:.76rem; padding:0 .85rem; min-height:40px; border-radius:8px; cursor:pointer; }
 .btn:hover { border-color:#3a3a3a; }
 .tsum { font-size:.74rem; color:var(--muted); padding:.6rem .6rem .2rem; white-space:normal; text-align:left; }
 .pl tr.grp td { font-size:.6rem; text-transform:uppercase; letter-spacing:.1em; color:var(--faint); font-weight:600; padding:.65rem .3rem .25rem; }
@@ -88,7 +140,7 @@ td.name span.strip { display:flex; gap:1px; width:6.6rem; margin-top:.3rem; }
 .chip.pre { border-color:rgba(90,169,230,.45); background:rgba(90,169,230,.06); }
 .chip b { color:#fff; font-weight:600; }
 .gf { display:flex; flex-wrap:wrap; gap:.35rem; margin:0 0 .6rem; }
-.gf button { background:var(--card); border:1px solid #2a2a2a; color:var(--muted); font:inherit; font-size:.72rem; padding:.22rem .6rem; border-radius:6px; cursor:pointer; }
+.gf button { background:var(--card); border:1px solid #2a2a2a; color:var(--muted); font:inherit; font-size:.74rem; padding:0 .7rem; min-height:40px; border-radius:8px; cursor:pointer; }
 .gf button.on { color:var(--fg); border-color:#555; }
 .ot { font-size:.58rem; font-weight:600; color:#d6d6d6; border:1px solid #4a4a4a; border-radius:3px; padding:0 .25rem; margin-left:.3rem; vertical-align:.05rem; }
 .pl .sl { display:block; font-size:.66rem; color:#7a7a7a; line-height:1.3; margin-top:.05rem; }
@@ -106,50 +158,65 @@ td.name span.strip { display:flex; gap:1px; width:6.6rem; margin-top:.3rem; }
 .lg { font-size:.68rem; padding:.15rem .6rem 0; display:flex; gap:.9rem; text-align:left; }
 .pd { display:inline-block; width:.42rem; height:.42rem; border-radius:50%; background:var(--live); margin-right:.3rem; vertical-align:.05rem; animation:pulse 1.6s infinite; }
 .hide-sm { }
-@media (max-width:520px) { .hide-sm { display:none; } td, th { padding-left:.2rem; padding-right:.2rem; } h1 { font-size:1.6rem; } }
+@media (max-width:520px) { .hide-sm { display:none; } td, th { padding-left:.2rem; padding-right:.2rem; } .top a.lk { display:none; } }
 </style>
 </head>
 <body>
-<nav><b>Fantasy1 Championship</b><a href="https://astukas12.github.io/f1c-report/">Weekly report</a><a href="https://astukas12.github.io/f1c-report/sims.html">Sim Center</a></nav>
+<header class="top"><div class="in"><b>F1C Live</b><span class="wk" id="wk"></span>
+  <span class="pill"><span class="dot off" id="ldot"></span><span id="ago">Loading…</span></span>
+  <a class="lk" href="https://astukas12.github.io/f1c-report/">Weekly report</a></div></header>
+<div class="sb" id="sb" aria-label="This week's games"></div>
+<nav class="tabs" aria-label="Sections"><div class="in" id="tabs">
+  <a href="#standings" class="on">Standings</a><a href="#left">What's Left</a><a href="#standings" id="tabLineups">Lineups</a><a href="#charts">Charts</a><a href="#f1sec">F1</a>
+</div></nav>
 <main>
-  <h1 id="title">Live</h1>
-  <div class="sub" id="sub">Live scores and sims, updated every minute during games</div>
-  <div class="status" id="status"><span><span class="dot off"></span>Loading…</span></div>
+  <div class="status" id="status"></div>
   <div id="replay"></div>
   <div id="err"></div>
 
+  <section id="standings">
   <h2>Live Standings</h2>
   <div class="tools"><button class="btn" id="toggle" type="button">Show all lineups</button></div>
-  <table id="board"></table>
-  <p class="note">Tap a team for its lineup. The strip under each team shows its chance of each finish this week, 1st on the left. Player ranges run from a low (10th percentile) to a high (90th percentile) final. Projected and odds come from <span id="srcs">the sims</span>; players in games underway keep their points so far plus a sim of the time left, matched to how the game is going (sims that look like the game so far count more, players who have left the game or haven't touched the ball are cut, and usage so far tilts the rest).</p>
+  <div class="cards" id="board"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
+  <p class="note">Tap a team for its lineup. The strip under each team shows its chance of each finish this week, 1st on the left. Player ranges run from a low (10th percentile) to a high (90th percentile) final. Projected and odds come from <span id="srcs">the sims</span>; players in games underway keep their points so far plus a sim of the time left, adjusted for how the game is going (players who have left the game or haven't touched the ball are cut, and usage so far tilts the rest).</p>
+  </section>
 
+  <section id="left">
+  <h2>What's Left</h2>
+  <div class="gf" id="gf"></div>
+  <table class="wl" id="games"><tr><td><div class="sk" style="height:12rem"></div></td></tr></table>
+  <p class="note">Gaps are points behind the current 1st, 3rd and 6th place scores, with each team's chance to finish there below.
+    For each player still to play: <b>needs</b> = points he must score from here before he adds anything to his team's best-ball lineup,
+    then the share of sims where he adds to it, and the points he adds on average. Tap a game above to see just its players.</p>
+  </section>
+
+  <section id="charts">
   <h2>Win Odds This Week</h2>
   <svg class="chart" id="chart" viewBox="0 0 720 260"></svg>
   <div class="legend" id="legend"></div>
   <p class="note" id="chartnote"></p>
 
   <h2>Expected F1 Points This Week</h2>
-  <svg class="chart" id="chart2" viewBox="0 0 720 260"></svg>
+  <svg class="chart" id="chart2" viewBox="0 0 720 320"></svg>
   <p class="note" id="chartnote2">Each team's average F1 points this week across the sims. Tap a line or name to pick out a team.</p>
+  </section>
 
-  <h2>What's Left</h2>
-  <div class="gf" id="gf"></div>
-  <table class="wl" id="games"></table>
-  <p class="note">Gaps are points behind the current 1st, 3rd and 6th place scores, with each team's chance to finish there below.
-    For each player still to play: <b>needs</b> = points he must score from here before he adds anything to his team's best-ball lineup,
-    then the share of sims where he adds to it, and the points he adds on average.</p>
-
+  <section id="f1sec">
   <h2>Live F1 Standings</h2>
   <table id="f1"></table>
   <p class="note">F1 points coming into the week plus each team's expected F1 points this week from the sims.</p>
+  </section>
 
+  <footer class="app">
+  <p class="note">Once a game is final, its players show MFL's official score. Games in progress are scored from ESPN's game stats with league rules, so they can differ from MFL until the game ends.</p>
+  <p class="note"><a href="https://astukas12.github.io/f1c-report/">Weekly report</a> · <a href="https://astukas12.github.io/f1c-report/sims.html">Sim Center</a></p>
   <div class="gts">
     <div><div class="k">Sims by Golden Ticket Sims</div>
       <div class="t">Sims for DraftKings contests</div>
       <div class="s">NFL · CFB · NHL · MMA · NASCAR · F1 · Tennis · Golf · NBA · CBB</div></div>
     <div class="p">$50/month</div>
   </div>
-  <p class="note">Once a game is final, its players show MFL's official score. Games in progress are scored from ESPN's game stats with league rules, so they can differ from MFL until the game ends.</p>
+  </footer>
 </main>
 
 <script>
@@ -160,6 +227,18 @@ const GAME_SEC = 3600, REAL_GAME_MS = 3.2 * 3600e3;
 const Q = new URLSearchParams(location.search);
 const REPLAY = Q.get("replay") === "1";
 let MODEL = Q.get("model") === "simple" ? "simple" : "smart";   // ?model=simple: points so far + pre-game sim x time left
+const NFLC = { ARI: ["#97233F", "#FFB612"], ATL: ["#A71930", "#A5ACAF"], BAL: ["#241773", "#9E7C0C"], BUF: ["#00338D", "#C60C30"],
+  CAR: ["#0085CA", "#101820"], CHI: ["#0B162A", "#C83803"], CIN: ["#FB4F14", "#000000"], CLE: ["#311D00", "#FF3C00"], DAL: ["#003594", "#869397"],
+  DEN: ["#FB4F14", "#002244"], DET: ["#0076B6", "#B0B7BC"], GB: ["#203731", "#FFB612"], HOU: ["#03202F", "#A71930"], IND: ["#002C5F", "#A2AAAD"],
+  JAX: ["#006778", "#D7A22A"], KC: ["#E31837", "#FFB81C"], LV: ["#000000", "#A5ACAF"], LAC: ["#0080C6", "#FFC20E"], LA: ["#003594", "#FFA300"],
+  MIA: ["#008E97", "#FC4C02"], MIN: ["#4F2683", "#FFC62F"], NE: ["#002244", "#C60C30"], NO: ["#D3BC8D", "#101820"], NYG: ["#0B2265", "#A71930"],
+  NYJ: ["#125740", "#FFFFFF"], PHI: ["#004C54", "#A5ACAF"], PIT: ["#FFB612", "#101820"], SF: ["#AA0000", "#B3995D"], SEA: ["#002244", "#69BE28"],
+  TB: ["#D50A0A", "#34302B"], TEN: ["#0C2340", "#4B92DB"], WAS: ["#5A1414", "#FFB612"] };
+function badge(t) {
+  const c = NFLC[t] || ["#2a2a2a", "#555"], n = parseInt(c[0].slice(1), 16);
+  const lum = (.2126 * (n >> 16) + .7152 * (n >> 8 & 255) + .0722 * (n & 255)) / 255;
+  return `<span class="tbg" style="background:${c[0]};color:${lum > .55 ? "#111" : "#fff"};box-shadow:inset 0 -2px 0 ${c[1]}">${esc(t)}</span>`;
+}
 const TEAM_COLORS = ["#E8C547", "#5aa9e6", "#4cc38a", "#c58af9", "#f08c3a", "#7dd3c0", "#e88fb0", "#a3b86c", "#8c9eff", "#d4a373", "#b0b6bd", "#ef8f7b"];
 const COLORS = ["#E8C547", "#4cc38a", "#5aa9e6", "#e5484d", "#c58af9", "#f08c3a"];
 
@@ -599,24 +678,24 @@ let openTeams = new Set();
 
 function render(res) {
   const sorted = [...res].sort((a, b) => b.win - a.win || b.mean - a.mean);
-  const maxW = Math.max(...sorted.map(r => r.win), 1);
-  let h = `<tr><th></th><th class="l">Team</th><th>Now</th><th>Proj</th><th>Win</th><th class="hide-sm">Top 3</th><th>Top 6</th><th>Exp F1</th></tr>`;
+  let h = "";
   sorted.forEach((r, k) => {
     const t = r.team, open = openTeams.has(t.id);
     const left = r.playing || r.left ? `${r.playing ? r.playing + " playing · " : ""}${r.left} to play` : "done";
-    h += `<tr class="team${k === 0 ? " first" : ""}${open ? " open" : ""}" data-id="${esc(t.id)}">
-      <td class="pos">${k + 1}</td><td class="l name"><b>${esc(t.name)}</b><span>${esc(t.franchise)} · ${left}</span>
-      ${allFinal(r) ? `<span class="fin">Final: ${ordn(r.mode + 1)}</span>` :
-        `<span class="fin">Likely finish ${ordn(r.mode + 1)} · range ${ordn(r.r10 + 1)}–${ordn(r.r90 + 1)}</span>${rankStrip(r)}`}</td>
-      <td class="big">${f1(r.cur)}</td><td class="dim">${f1(r.mean)}</td>
-      <td>${pct(r.win)}<span class="bar hide-sm" style="width:${(2.2 * r.win / maxW).toFixed(2)}rem"></span></td>
-      <td class="hide-sm">${pct(r.top3)}</td><td>${pct(r.top6)}</td><td>${r.ef1.toFixed(1)}</td></tr>`;
-    if (open) h += `<tr class="detail"><td colspan="8">${playersTable(r)}</td></tr>`;
+    h += `<div class="card${open ? " open" : ""}" data-id="${esc(t.id)}"><div class="hd">
+      <div class="ch"><div class="rk">${k + 1}</div>
+        <div class="tn"><b>${esc(t.name)}</b><span>${esc(t.franchise)} · ${left}</span>
+          ${allFinal(r) ? `<span class="fin">Final: ${ordn(r.mode + 1)}</span>` :
+            `<span class="fin">Likely finish ${ordn(r.mode + 1)} · range ${ordn(r.r10 + 1)}–${ordn(r.r90 + 1)}</span>${rankStrip(r)}`}</div>
+        <div class="nv"><b data-k="t${esc(t.id)}" data-v="${r.cur.toFixed(1)}">${f1(r.cur)}</b><small>Proj ${f1(r.mean)}</small></div></div>
+      <div class="cs"><div><i>Win</i>${pct(r.win)}</div><div><i>Top 3</i>${pct(r.top3)}</div><div><i>Top 6</i>${pct(r.top6)}</div><div><i>Exp F1</i>${r.ef1.toFixed(1)}</div></div>
+    </div>${open ? `<div class="detail">${playersTable(r)}</div>` : ""}</div>`;
   });
   $("board").innerHTML = h; syncToggle();
-  document.querySelectorAll("tr.team").forEach(tr => tr.onclick = () => {
-    const id = tr.dataset.id; openTeams.has(id) ? openTeams.delete(id) : openTeams.add(id); render(LAST);
+  document.querySelectorAll(".card .hd").forEach(hd => hd.onclick = () => {
+    const id = hd.parentNode.dataset.id; openTeams.has(id) ? openTeams.delete(id) : openTeams.add(id); render(LAST);
   });
+  renderScoreboard();
 
   renderLeft(res);
 
@@ -630,7 +709,64 @@ function render(res) {
   $("f1").innerHTML = fh;
 
   renderChart(res);
+  markPicked(); animateNums(document);
 }
+
+// ---------- scoreboard strip ----------
+let sbScrolled = false;
+function renderScoreboard() {
+  const sc = (g, side) => g.state === "pre" ? "" : (side === "a" ? g.ascore : g.hscore);
+  $("sb").innerHTML = games.map(g => `<button class="gm ${g.state}${wlGame === g.id ? " sel" : ""}" data-g="${esc(g.id)}" type="button">
+    <div class="gr">${badge(g.away)}<b>${esc(sc(g, "a"))}</b></div><div class="gr">${badge(g.home)}<b>${esc(sc(g, "h"))}</b></div>
+    <div class="gs">${esc(g.state === "post" ? "Final" : g.state === "in" ? gameClock(g).trim() : gameTag(g))}</div></button>`).join("");
+  $("sb").querySelectorAll(".gm").forEach(b => b.onclick = () => {
+    wlGame = wlGame === b.dataset.g ? "all" : b.dataset.g;
+    renderScoreboard(); renderLeft(LAST); markPicked();
+    if (wlGame !== "all") $("left").scrollIntoView();
+  });
+  if (!sbScrolled) {   // start the strip at the first game not yet final
+    const first = $("sb").querySelector(".gm.in, .gm.pre"); if (first) $("sb").scrollLeft = first.offsetLeft - 16;
+    sbScrolled = true;
+  }
+}
+function markPicked() {   // a game picked on the scoreboard: its players stand out in the lineups and What's Left
+  document.querySelectorAll(".pick").forEach(e => e.classList.remove("pick"));
+  if (wlGame !== "all") document.querySelectorAll(`[data-g="${CSS.escape(wlGame)}"]`).forEach(e => { if (!e.classList.contains("gm")) e.classList.add("pick"); });
+}
+
+// ---------- number transitions: a changed score counts up and flashes ----------
+const PREV = {};
+function animateNums(root) {
+  root.querySelectorAll("[data-k]").forEach(el => {
+    const k = el.dataset.k, v = +el.dataset.v, d = +(el.dataset.d || 1), p = PREV[k]; PREV[k] = v;
+    if (REPLAY || p == null || Math.abs(p - v) < .05 || isNaN(v)) return;
+    const t0 = performance.now(), run = now => { const f = Math.min(1, (now - t0) / 700), e = 1 - (1 - f) ** 3;
+      el.textContent = (p + (v - p) * e).toFixed(d); if (f < 1) requestAnimationFrame(run); };
+    requestAnimationFrame(run);
+    const host = el.dataset.flash === "row" ? el.closest("tr") : el;
+    host.classList.remove("flash"); void host.offsetWidth; host.classList.add("flash");
+  });
+}
+
+// ---------- section tabs follow the scroll ----------
+function setupTabs() {
+  const tabs = [...document.querySelectorAll("#tabs a")];
+  $("tabLineups").onclick = ev => { ev.preventDefault(); L.teams.forEach(t => openTeams.add(t.id)); if (LAST) render(LAST); $("standings").scrollIntoView(); };
+  const secs = ["standings", "left", "charts", "f1sec"].map(id => $(id));
+  const on = () => {
+    let cur = secs[0]; for (const sct of secs) if (sct.getBoundingClientRect().top < 140) cur = sct;
+    tabs.forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + cur.id && a.id !== "tabLineups"));
+  };
+  addEventListener("scroll", on, { passive: true }); on();
+}
+
+// ---------- "Updated 12s ago" ----------
+let lastUpdate = 0;
+setInterval(() => {
+  if (REPLAY || !lastUpdate) return;
+  const s = Math.round((Date.now() - lastUpdate) / 1000);
+  $("ago").textContent = (games.some(g => g.state === "in") ? "Live · " : "") + "updated " + (s < 60 ? s + "s" : Math.round(s / 60) + "m") + " ago";
+}, 1000);
 
 // a player's final: points so far plus the draw for the time left (draw quantiles are precomputed per row)
 let QLO, QHI, QMU;
@@ -673,7 +809,7 @@ function renderLeft(res) {
   if (wlGame !== "all" && !remGames.some(g => g.id === wlGame)) wlGame = "all";
   $("gf").innerHTML = remGames.length > 1 ? [`<button data-g="all" class="${wlGame === "all" ? "on" : ""}">All</button>`,
     ...remGames.map(g => `<button data-g="${esc(g.id)}" class="${wlGame === g.id ? "on" : ""}">${esc(g.away)} @ ${esc(g.home)}</button>`)].join("") : "";
-  $("gf").querySelectorAll("button").forEach(b => b.onclick = () => { wlGame = b.dataset.g; renderLeft(LAST); });
+  $("gf").querySelectorAll("button").forEach(b => b.onclick = () => { wlGame = b.dataset.g; renderLeft(LAST); renderScoreboard(); markPicked(); });
   const gapCell = (k, n, v, odds) => k < n ? `<td class="gap dim">–<i>${pct(odds)}</i></td>` : `<td class="gap">${(v).toFixed(1)}<i>${pct(odds)}</i></td>`;
   let h = `<tr><th></th><th class="l">Team</th><th>Now</th><th>to Win</th><th>to Podium</th><th>to Points</th></tr>`;
   by.forEach((r, k) => {
@@ -682,7 +818,7 @@ function renderLeft(res) {
       .sort((a, b) => r.now[b].add - r.now[a].add).map(i => {
         const p = r.ps[i], n = r.now[i], g = n.g || p.game, nd = needs(r, i);
         const last = p.name.replace(/\s+(Jr\.?|Sr\.?|II|III|IV|V)$/i, "").split(" ").slice(-1)[0];
-        return `<span class="chip ${n.state}"><b>${esc(last)}</b> ${esc(p.nfl)} · ${esc(gameTag(g))} · needs ${nd == null ? "–" : nd.toFixed(1)} · ${pct(100 * n.cnt)} · +${n.add.toFixed(1)}</span>`;
+        return `<span class="chip ${n.state}" data-g="${esc((g || {}).id || "")}"><b>${esc(last)}</b> ${badge(n.tm || p.nfl)} · ${esc(gameTag(g))} · needs ${nd == null ? "–" : nd.toFixed(1)} · ${pct(100 * n.cnt)} · +${n.add.toFixed(1)}</span>`;
       });
     const anyLeft = r.now.some(n => n.left);
     h += `<tr class="${cutLine ? "cut" : ""}${chips.length || anyLeft ? " team2" : ""}"><td class="pos">${k + 1}</td><td class="l name"><b>${esc(r.team.name)}</b></td>
@@ -705,9 +841,9 @@ function playersTable(r) {
   const row = (i, on) => {
     const p = r.ps[i], n = r.now[i], fd = finalDist(p, n), pre = n.state === "pre" || n.state === "bye";
     const sc = { in: "s-in", post: "s-post", pre: "s-pre" }[n.state] || "";
-    return `<tr class="${on ? "" : "bench "}${sc}"><td class="slot">${on ? r.slot[i] : p.pos}</td>
-      <td class="pn">${esc(p.name)} <span class="st">${esc(p.nfl)}</span>${n.tag ? `<span class="ot" title="${esc(n.why || "")}">${n.tag}</span>` : ""}${stLabel(n, p)}${n.state === "in" || n.state === "post" ? statLine(p.pos, n.st) : ""}</td>
-      <td class="now">${pre ? '<span class="dim">–</span>' : f1(n.pts)}</td><td class="proj">${n.state === "post" ? '<span class="dim">–</span>' : f1(fd.mu)}</td><td class="rg">${n.state === "post" ? "" : `${Math.round(fd.lo)}–${Math.round(fd.hi)}`}</td></tr>`;
+    return `<tr class="${on ? "" : "bench "}${sc}" data-g="${esc((n.g || p.game || {}).id || "")}"><td class="slot">${on ? r.slot[i] : p.pos}</td>
+      <td class="pn">${esc(p.name)} ${badge(n.tm || p.nfl)}${n.tag ? `<span class="ot" title="${esc(n.why || "")}">${n.tag}</span>` : ""}${stLabel(n, p)}${n.state === "in" || n.state === "post" ? statLine(p.pos, n.st) : ""}</td>
+      <td class="now">${pre ? '<span class="dim">–</span>' : `<span data-k="p${esc(p.id)}" data-v="${n.pts.toFixed(1)}" data-flash="row">${f1(n.pts)}</span>`}</td><td class="proj">${n.state === "post" ? '<span class="dim">–</span>' : f1(fd.mu)}</td><td class="rg">${n.state === "post" ? "" : `${Math.round(fd.lo)}–${Math.round(fd.hi)}`}</td></tr>`;
   };
   const head = t => `<tr class="grp"><td class="gl" colspan="2">${t}</td><td>Now</td><td>Proj</td><td>Range</td></tr>`;
   let h = `<div class="tsum">${sum}</div><div class="lg"><span class="c-in">● Live</span><span class="c-post">● Final</span><span class="c-pre">● To play</span></div><table class="pl">` + head("In the lineup") + starters.map(i => row(i, true)).join("");
@@ -825,12 +961,12 @@ let LAST = null, timer = null;
 function statusLine() {
   const live = games.filter(g => g.state === "in").length, done = games.filter(g => g.state === "post").length;
   const next = games.find(g => g.state === "pre");
-  const parts = [`<span><span class="dot${live ? "" : " off"}"></span>${live ? live + " game" + (live > 1 ? "s" : "") + " live" : "No games live"}</span>`,
-    `<span>${done} of ${games.length} final</span>`];
+  const parts = [`<span>${live ? live + " game" + (live > 1 ? "s" : "") + " live · " : ""}${done} of ${games.length} final</span>`];
   if (next && !live) parts.push(`<span>Next: ${esc(next.away)} @ ${esc(next.home)}, ${esc(fmtKick(next.kickoff))}</span>`);
-  if (!REPLAY) parts.push(`<span>Updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>`);
   if (!REPLAY && !live && nextTickAt - Date.now() > 5 * 60e3) parts.push(`<span>Next update ${esc(fmtKick(nextTickAt))}</span>`);
   $("status").innerHTML = parts.join("");
+  $("ldot").className = "dot" + (live ? "" : " off");
+  if (REPLAY) $("ago").textContent = "Replay"; else if (!lastUpdate) $("ago").textContent = live ? "Live" : "Updated just now";
 }
 // The week file is rebuilt at noon (rosters, after waivers) and before each game window (GTS sims); a new week
 // moves current.json. Either one reloads the page.
@@ -851,7 +987,7 @@ async function tick() {
     if (Date.now() - lastDataCheck > 10 * 60e3) { lastDataCheck = Date.now(); if (await dataChanged()) { location.reload(); return; } }
     await loadScoreboard(); attachGames(); await loadStats(); indexNames();
     try { MFL = await getJSON(`week-${String(L.week).padStart(2, "0")}-mfl.json`); } catch (e) { /* not published yet */ }
-    LAST = runSims(true); pushHistory(Date.now(), LAST); $("err").innerHTML = "";
+    LAST = runSims(true); pushHistory(Date.now(), LAST); $("err").innerHTML = ""; lastUpdate = Date.now();
   } catch (e) { console.error(e); $("err").innerHTML = `<div class="err">Couldn't reach live scores (${esc(e.message)}). Retrying.</div>`; }
   const now = Date.now(), live = games.some(g => g.state === "in");
   const next = games.filter(g => g.state === "pre").map(g => g.kickoff).sort((a, b) => a - b)[0];
@@ -913,7 +1049,7 @@ async function startReplay() {
     } catch (e) { console.warn(e); }
     $("toggle").onclick = () => { if (openTeams.size >= L.teams.length) openTeams.clear(); else L.teams.forEach(t => openTeams.add(t.id));
       if (LAST) render(LAST); else syncToggle(); };
-    $("title").textContent = `Week ${L.week} Live`;
+    $("wk").textContent = `Week ${L.week}`; setupTabs();
     $("srcs").textContent = L.sources;
     document.title = `F1C Week ${L.week} Live`;
     if (REPLAY) return startReplay();
