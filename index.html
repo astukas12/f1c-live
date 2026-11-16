@@ -677,7 +677,7 @@ function syncToggle() { $("toggle").textContent = openTeams.size >= L.teams.leng
 let openTeams = new Set();
 
 function render(res) {
-  const sorted = [...res].sort((a, b) => b.win - a.win || b.mean - a.mean);
+  const sorted = [...res].sort((a, b) => b.ef1 - a.ef1 || b.win - a.win || b.mean - a.mean);   // ranked by expected F1 points
   let h = "";
   sorted.forEach((r, k) => {
     const t = r.team, open = openTeams.has(t.id);
