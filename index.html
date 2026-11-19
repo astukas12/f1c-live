@@ -987,7 +987,7 @@ async function tick() {
     if (Date.now() - lastDataCheck > 10 * 60e3) { lastDataCheck = Date.now(); if (await dataChanged()) { location.reload(); return; } }
     await loadScoreboard(); attachGames(); await loadStats(); indexNames();
     try { MFL = await getJSON(`week-${String(L.week).padStart(2, "0")}-mfl.json`); } catch (e) { /* not published yet */ }
-    LAST = runSims(true); pushHistory(Date.now(), LAST); $("err").innerHTML = ""; lastUpdate = Date.now();
+    LAST = useSimCenter(runSims(true), false); pushHistory(Date.now(), LAST); $("err").innerHTML = ""; lastUpdate = Date.now();
   } catch (e) { console.error(e); $("err").innerHTML = `<div class="err">Couldn't reach live scores (${esc(e.message)}). Retrying.</div>`; }
   const now = Date.now(), live = games.some(g => g.state === "in");
   const next = games.filter(g => g.state === "pre").map(g => g.kickoff).sort((a, b) => a - b)[0];
@@ -1001,10 +1001,30 @@ document.addEventListener("visibilitychange", () => {
   if (nextTickAt - Date.now() > 60e3) { lastDataCheck = 0; tick(); }
 });
 
+// One sim with the Sim Center (19 Nov 2026): the week file carries the Sim Center's own table (pregame) for the
+// games that were final when it was built (final_teams). While no game is underway and the same games are final,
+// show those numbers as-is; once a game is live, the page re-sims from the same run's draws.
+function sameStateAsBuild(allPre) {
+  if (!L.pregame || REPLAY) return false;
+  const ft = new Set(L.final_teams || []);
+  if (allPre) return ft.size === 0;
+  if (games.some(g => g.state === "in")) return false;
+  const rostered = new Set(L.players.map(p => p.nfl));
+  const fin = new Set(games.filter(g => g.state === "post").flatMap(g => [g.away, g.home]).filter(t => rostered.has(t)));
+  if (fin.size !== ft.size) return false;
+  for (const t of fin) if (!ft.has(t)) return false;
+  return true;
+}
+function useSimCenter(res, allPre) {
+  if (!sameStateAsBuild(allPre)) return res;
+  const P = new Map(L.pregame.map(p => [p.id, p]));
+  res.forEach(r => { const p = P.get(r.team.id); if (p) Object.assign(r, { win: p.win, top3: p.top3, top6: p.top6, ef1: p.ef1, mean: p.mean }); });
+  return res;
+}
 function pregame() {   // all games unplayed: the pre-game sims
   const saved = games.map(g => [g.state, g.frac]);
   games.forEach(g => { g.state = "pre"; g.frac = 1; }); const st = stats; stats = {};
-  const r = runSims(false);
+  const r = useSimCenter(runSims(false), true);
   games.forEach((g, i) => { g.state = saved[i][0]; g.frac = saved[i][1]; }); stats = st;
   return r;
 }
@@ -1050,7 +1070,7 @@ async function startReplay() {
     $("toggle").onclick = () => { if (openTeams.size >= L.teams.length) openTeams.clear(); else L.teams.forEach(t => openTeams.add(t.id));
       if (LAST) render(LAST); else syncToggle(); };
     $("wk").textContent = `Week ${L.week}`; setupTabs();
-    $("srcs").textContent = L.sources;
+    $("srcs").textContent = L.sources + (L.run ? ` (${L.run}, the same sim as the Sim Center)` : "");
     document.title = `F1C Week ${L.week} Live`;
     if (REPLAY) return startReplay();
     await loadScoreboard(); attachGames();
