@@ -370,14 +370,30 @@ async function loadReplay() {
     for (const [id, o] of Object.entries(finalBox[g.id])) TEAM_OF[id] = o.team;
   }));
 }
+// History and replay: where each game stood at wall time T, from ESPN's timestamp on every play (halftime, reviews
+// and late starts included). Falls back to kickoff + an even 3.2 hours when a feed has no timestamps.
+let CLOCK_WALL = true, HIST_N = 5000;
+function gameAt(g, T, over) {
+  const ev = g.pbp || [], first = ev.find(e => e.w), lastW = [...ev].reverse().find(e => e.w);
+  if (CLOCK_WALL && first) {
+    if (T < first.w) return { p: 0, el: 0 };
+    if (over && T >= lastW.w) return { p: 1, el: GAME_SEC };
+    let last = first; for (const e of ev) { if (e.w && e.w > T) break; last = e; }
+    const el = Math.min(GAME_SEC - 1, Math.max(1, last.t));
+    return { p: el / GAME_SEC, el, Tw: T };
+  }
+  const p = Math.min(1, Math.max(0, (T - g.kickoff) / REAL_GAME_MS));
+  return { p, el: p * GAME_SEC };
+}
+const gameEnd = g => { const w = [...(g.pbp || [])].reverse().find(e => e.w); return CLOCK_WALL && w ? w.w : g.kickoff + REAL_GAME_MS; };
 function replayAt(T) {
   stats = {};
   for (const g of games) {
-    const p = Math.min(1, Math.max(0, (T - g.kickoff) / REAL_GAME_MS));
+    const at = gameAt(g, T, true), p = at.p;
     g.frac = 1 - p; g.state = p === 0 ? "pre" : p === 1 ? "post" : "in";
-    const el = p * GAME_SEC, q = Math.min(4, 1 + Math.floor(el / 900));
+    const el = at.el, q = Math.min(4, 1 + Math.floor(el / 900));
     g.period = q; g.clock = mmss(Math.max(0, q * 900 - el)); g.half = false;
-    g.ps = pbpState(g, p === 1 ? Infinity : el);
+    g.ps = pbpState(g, p === 1 ? Infinity : el, p === 1 ? null : at.Tw);
     if (g.state === "post") { g.ascore = g.fa; g.hscore = g.fh; } else { g.ascore = g.ps.a; g.hscore = g.ps.h; }
     g.hideScore = false;
     g.label = g.state === "pre" ? fmtKick(g.kickoff) : g.state === "post" ? "Final" : `Q${q} ${g.clock}`;
@@ -407,7 +423,7 @@ function parsePBP(sum, g) {
       if (seen.has(p.id)) continue; seen.add(p.id);
       const per = (p.period && p.period.number) || 1, type = (p.type && p.type.text) || "";
       let tx = p.text || "";
-      const e = { t: (per - 1) * 900 + 900 - clockSec(p.clock), off, a: p.awayScore, h: p.homeScore, dl: [], inv: [], inj: [], ret: [], offPlay: false };
+      const e = { t: (per - 1) * 900 + 900 - clockSec(p.clock), w: Date.parse(p.wallclock) || null, off, a: p.awayScore, h: p.homeScore, dl: [], inv: [], inj: [], ret: [], offPlay: false };
       for (const m of tx.matchAll(RE_INJ)) e.inj.push([tm(m[1]), nmKey(m[2])]);
       for (const m of tx.matchAll(RE_RET)) e.ret.push([tm(m[1]), nmKey(m[2])]);
       const tp = /TWO-POINT CONVERSION ATTEMPT\.(.*?)ATTEMPT (SUCCEEDS|FAILS)/i.exec(tx);
@@ -441,11 +457,11 @@ function parsePBP(sum, g) {
 }
 const pbpPts = s => .04 * Math.max(0, s.py || 0) + 4 * (s.ptd || 0) - (s.int || 0) + .1 * Math.max(0, s.ry || 0) + 6 * (s.rtd || 0) +
   (s.rec || 0) + .1 * Math.max(0, s.rcy || 0) + 6 * (s.rctd || 0) - (s.fl || 0) + 2 * (s.two || 0);
-function pbpState(g, elSec) {   // the game up to elSec game-seconds in
+function pbpState(g, elSec, Tw) {   // the game up to elSec game-seconds in (or, with Tw, every play before wall time Tw)
   const pl = {}, plays = {}, team = {}; let a = 0, h = 0;
   const get = (off, k) => pl[off + "|" + k] || (pl[off + "|" + k] = { st: {}, inv: 0, hurt: false, hurtAt: 0 });
   for (const e of g.pbp || []) {
-    if (e.t > elSec) break;
+    if (Tw != null ? (e.w && e.w > Tw) : e.t > elSec) break;
     if (e.a != null) { a = e.a; h = e.h; }
     if (e.offPlay) plays[e.off] = (plays[e.off] || 0) + 1;
     for (const [k, f, v] of e.dl) { const o = get(e.off, k); o.st[f] = (o.st[f] || 0) + v; }
@@ -490,7 +506,7 @@ const KOPP = { QB: 2.1, RB: 1.3, WR: .57, TE: .56 };
 // Tested on weeks 8 and 9 (every game stopped at 25/50/75% and compared with the finals): the sqrt spread, A and B
 // help; matching sims to the game so far (kc, team totals kd) cut player error a little but made team totals worse
 // early in both weeks, so it is off unless the page is opened with ?match=1.
-const CFG = Q.get("match") === "1" ? { kc: 4, cc: 6, kd: 3, cd: 8, wb: .5, sqrtv: true } : { kc: 0, cc: 6, kd: 0, cd: 8, wb: .5, sqrtv: true };
+const CFG = Q.get("match") === "1" ? { kc: 4, cc: 6, kd: 3, cd: 8, wb: .5, sqrtv: true } : { kc: 0, cc: 6, kd: 0, cd: 8, wb: .5, sqrtv: true, sx: .35 };   // sx: tuned on weeks 8-10 (23 Nov 2026; .5 left team ranges too tight late)
 function adjust(p, n, s, g) {
   const el = 1 - n.frac, u = n.u, box = (s && s.st) || {};
   const listedOut = !REPLAY && /^(Out|Injured Reserve)$/i.test((g.inj && p.espn && g.inj[p.espn]) || "");
@@ -504,9 +520,10 @@ function adjust(p, n, s, g) {
   // touches at halftime scored about their projection after it, so that only trims late in the game.)
   if (u && u.hurt) {
     const since = ((g.ps && g.ps.plays[n.tm]) || 0) - u.hurtAt;
+    // eases down over the plays he misses: 92% right after the note, 30% after 8 plays, 0 after 25
     if (since >= 25) { n.m = 0; n.tag = "Out?"; n.why = `injured, not back for ${since} plays`; }
-    else if (since >= 8) { n.m = .3; n.tag = "Hurt"; n.why = `injured, not back for ${since} plays`; }
-    else { n.m = .7; n.tag = "Hurt"; n.why = "injured on a recent play"; }
+    else { n.m = since < 8 ? 1 - .7 * (since + 1) / 9 : .3 * (1 - (since - 8) / 17); n.tag = "Hurt";
+           n.why = since ? `injured, not back for ${since} plays` : "injured on the last play"; }
     return;
   }
   if (!opps && el >= .75 && p.proj > 4) { n.m = .5; n.tag = "No touches"; n.why = "no touches or targets through three quarters"; return; }
@@ -594,7 +611,7 @@ function runSims(withGames, nUse) {
     for (let s = 0; s < N; s++) R[s] = D[base + (idx ? idx[s] : s)] / 10;
     if (MODEL === "smart" && CFG.sqrtv && n.state === "in") {
       const fr = n.frac; let dm = 0; for (let s = 0; s < N; s++) dm += R[s]; dm /= N;
-      const a = Math.sqrt(fr);
+      const a = Math.pow(fr, CFG.sx || .5);   // spread of the time left shrinks like (time left)^sx
       for (let s = 0; s < N; s++) R[s] = n.m * Math.max(0, fr * dm + a * (R[s] - dm));
     } else for (let s = 0; s < N; s++) R[s] *= f;
     return R;
@@ -904,6 +921,12 @@ function drawChart(svg, hist, k, col, fmt, ymaxOf, grid, gfmt, Hh) {
   labels.forEach((l, i) => l.y = Math.max(y(l.v) + 4, i ? labels[i - 1].y + gap : top));
   for (let i = labels.length - 1; i >= 0; i--) labels[i].y = Math.min(labels[i].y, i === labels.length - 1 ? bot : labels[i + 1].y - gap);
   for (const l of labels) s += `<text class="lab" data-id="${esc(l.id)}" x="${W - m.r + 6}" y="${l.y.toFixed(1)}" fill="${col[l.id]}" font-size="11" font-weight="600">${esc(L.teams.find(t => t.id === l.id).name)} ${fmt(l.v)}</text>`;
+  // dashed line where the current sims were built (the whole line is computed with them)
+  const bt = !REPLAY && L.built ? Date.parse(L.built.replace(/([+-]\d\d)(\d\d)$/, "$1:$2")) : NaN;
+  if (bt > axis[0].t && bt < axis[nA - 1].t) {
+    const bi = axis.findIndex(h => h.t >= bt), bx = x(Math.max(0, bi - .5));
+    s += `<line x1="${bx}" x2="${bx}" y1="${m.t}" y2="${H - m.b}" stroke="#4a4a4a" stroke-dasharray="3 3"/><text x="${bx + 4}" y="${m.t + 10}" fill="#6a6a6a" font-size="10">Sims ${esc(new Date(bt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }))}</text>`;
+  }
   svg.innerHTML = s;
   const pick = id => { svg.classList.toggle("hl", !!id); svg.querySelectorAll(".ln,.lab").forEach(e => e.classList.toggle("on", e.dataset.id === id)); };
   pick(chartSel[svg.id]);
@@ -919,10 +942,10 @@ function stateAt(T) {
   stats = {};
   for (const g of games) {
     const live = g._live;
-    let p = live.state === "pre" ? 0 : Math.min(1, Math.max(0, (T - g.kickoff) / REAL_GAME_MS));
-    if (live.state !== "post") p = Math.min(p, .99);
+    const at = live.state === "pre" ? { p: 0, el: 0 } : gameAt(g, T, live.state === "post");
+    const p = live.state !== "post" ? Math.min(at.p, .99) : at.p;
     g.frac = 1 - p; g.state = p === 0 ? "pre" : p === 1 ? "post" : "in";
-    g.ps = g.pbp ? pbpState(g, p === 1 ? Infinity : p * GAME_SEC) : null;
+    g.ps = g.pbp ? pbpState(g, p === 1 ? Infinity : at.el, p === 1 ? null : at.Tw) : null;
     if (g.state === "post") Object.assign(stats, finalBox[g.id] || {});
   }
 }
@@ -934,19 +957,22 @@ async function backfill() {
   games.forEach(g => { g._live = Object.fromEntries(keep.map(k => [k, g[k]])); });
   try {
     const step = 15 * 60e3, now = Date.now(), set = new Set();
-    for (const g of started) for (let T = g.kickoff; T <= Math.min(now, g.kickoff + REAL_GAME_MS); T += step) set.add(T);
+    for (const g of started) { const end = Math.min(now, g.state === "post" ? gameEnd(g) : now); for (let T = g.kickoff; T <= end; T += step) set.add(T); if (g.state === "post" && end < now) set.add(end + 60e3); }
     const steps = [...set].sort((a, b) => a - b), hist = [];
     const pg = pregame(), w0 = {}, e0 = {}; pg.forEach(r => { w0[r.team.id] = +r.win.toFixed(1); e0[r.team.id] = +r.ef1.toFixed(2); });
     hist.push({ t: games[0].kickoff - 60e3, w: w0, e: e0 });
     HIST = true;
     for (let k = 0; k < steps.length; k++) {
-      stateAt(steps[k]); indexNames(); const r = runSims(false, 1000);
+      stateAt(steps[k]); indexNames(); const r = runSims(false, HIST_N);
       const w = {}, e = {}; r.forEach(x => { w[x.team.id] = +x.win.toFixed(1); e[x.team.id] = +x.ef1.toFixed(2); }); hist.push({ t: steps[k], w, e });
-      if (k % 6 === 5) await new Promise(res => setTimeout(res, 0));
+      if (k % 3 === 2) {   // draw what is built so far, then carry on (yielding often keeps phones responsive)
+        const keepH = history; history = [...hist]; if (LAST) renderChart(LAST); history = keepH;
+        await new Promise(res => setTimeout(res, 0));
+      }
     }
     const last = steps[steps.length - 1] || 0;
     history = [...hist, ...history.filter(h => h.t > last + 60e3 && h.e)];
-    HIST_NOTE = "Rebuilt from the play-by-play every 15 minutes while games were on (using the current projections and sims), then a point each update.";
+    HIST_NOTE = "Rebuilt from the play-by-play every 15 minutes while games were on, at each play's real time, with the current sims (5,000, the same draws as the live updates); then a point each update. The dashed line marks when the current sims were built.";
   } catch (e) { console.warn("backfill", e); }
   finally {
     HIST = false;
@@ -1034,8 +1060,8 @@ async function startReplay() {
   // steps only while some game is on: each game's kickoff to kickoff + 3.2h every 15 minutes,
   // plus one step before the first kickoff and one after the last finish
   const step = 15 * 60e3, set = new Set();
-  for (const g of games) for (let T = g.kickoff; T <= g.kickoff + REAL_GAME_MS; T += step) set.add(T);
-  const tA = Math.min(...set) - step, tB = Math.max(...games.map(g => g.kickoff + REAL_GAME_MS)) + step;
+  for (const g of games) { for (let T = g.kickoff; T <= gameEnd(g); T += step) set.add(T); set.add(gameEnd(g) + 60e3); }
+  const tA = Math.min(...set) - step, tB = Math.max(...games.map(gameEnd)) + step;
   set.add(tA); set.add(tB);
   const steps = [...set].sort((a, b) => a - b);
 
@@ -1045,7 +1071,7 @@ async function startReplay() {
   $("chartnote").textContent = "Building the replay…";
   const hist = [];
   for (let k = 0; k < steps.length; k++) {
-    replayAt(steps[k]); indexNames(); const r = runSims(false, 1000);
+    replayAt(steps[k]); indexNames(); const r = runSims(false, HIST_N);
     const w = {}, e = {}; r.forEach(x => { w[x.team.id] = +x.win.toFixed(1); e[x.team.id] = +x.ef1.toFixed(2); }); hist.push({ t: steps[k], w, e });
     if (k % 8 === 7) await new Promise(res => setTimeout(res, 0));
   }
