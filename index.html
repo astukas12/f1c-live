@@ -511,7 +511,7 @@ const KOPP = { QB: 2.1, RB: 1.3, WR: .57, TE: .56 };
 // Tested on weeks 8 and 9 (every game stopped at 25/50/75% and compared with the finals): the sqrt spread, A and B
 // help; matching sims to the game so far (kc, team totals kd) cut player error a little but made team totals worse
 // early in both weeks, so it is off unless the page is opened with ?match=1.
-const CFG = Q.get("match") === "1" ? { kc: 4, cc: 6, kd: 3, cd: 8, wb: .5, sqrtv: true } : { kc: 0, cc: 6, kd: 0, cd: 8, wb: .5, sqrtv: true, sx: .35 };   // sx: tuned on weeks 8-10 (23 Nov 2026; .5 left team ranges too tight late)
+const CFG = Q.get("match") === "1" ? { kc: 4, cc: 6, kd: 3, cd: 8, wb: .5, sqrtv: true } : { kc: 0, cc: 6, kd: 0, cd: 8, wb: .5, sqrtv: true, sx: .35, blow: .3 };   // blow: late blowouts trim starters' rest-of-game (23 Nov; small measured gain on team totals)   // sx: tuned on weeks 8-10 (23 Nov 2026; .5 left team ranges too tight late)
 function adjust(p, n, s, g) {
   const el = 1 - n.frac, u = n.u, box = (s && s.st) || {};
   const listedOut = !REPLAY && /^(Out|Injured Reserve)$/i.test((g.inj && p.espn && g.inj[p.espn]) || "");
