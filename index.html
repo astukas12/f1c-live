@@ -498,6 +498,11 @@ function playerNow(p) {
   if ((REPLAY || HIST) && g.state === "in") { n.pts = u ? u.pts : 0; n.st = u ? u.st : null; }
   if (!REPLAY && g.state === "post" && MFL && MFL.players && MFL.players[p.id] != null) { n.espnPts = n.pts; n.pts = +MFL.players[p.id]; n.mfl = true; }
   if (MODEL === "smart") adjust(p, n, s, g);
+  // blowouts: late in a lopsided game starters lose snaps (CFG.blow, off unless tested)
+  if (MODEL === "smart" && CFG.blow && n.state === "in" && g.ps) {
+    const el = 1 - n.frac, mg = Math.abs((g.ps.a || 0) - (g.ps.h || 0));
+    if (el > .7 && mg >= 21) n.m *= 1 - CFG.blow * Math.min(1, (el - .7) / .3) * Math.min(1, (mg - 14) / 14);
+  }
   return n;
 }
 // Opportunities per projected point (QB dropbacks + carries; RB carries + targets; WR/TE targets + carries),
@@ -578,8 +583,9 @@ function gameIndex(g, N, NR, gps) {
   const add = (x, base, M, k, c) => { for (let s = 0; s < N; s++) { const e = M[base + s] / 10 * el, sd = k * Math.sqrt(e) + c, z = (x - e) / sd; lw[s] += -.5 * z * z - Math.log(sd); } };
   if (CFG.kc) for (const [p, n] of gps) add(n.pts, p.row * NR, D, CFG.kc, CFG.cc);
   if (CFG.kd) for (const t of [g.away, g.home]) if (TM && TMROW[t] != null) add(teamSoFar(g, t), TMROW[t] * NR, TM, CFG.kd, CFG.cd);
+  if (CFG.pw) for (let s = 0; s < N; s++) lw[s] *= CFG.pw;   // tempered weights (power < 1)
   let mx = -Infinity; for (let s = 0; s < N; s++) if (lw[s] > mx) mx = lw[s];
-  const w = new Float64Array(N), target = Math.min(300, .3 * N);
+  const w = new Float64Array(N), target = CFG.essMin ? Math.min(CFG.essMin, .5 * N) : Math.min(300, .3 * N);
   const ess = tau => { let a = 0, b = 0; for (let s = 0; s < N; s++) { const v = Math.exp(tau * (lw[s] - mx)); w[s] = v; a += v; b += v * v; } return a * a / b; };
   let tau = 1, E = ess(1);
   if (E < target) { let lo = 0, hi = 1; for (let k = 0; k < 18; k++) { const mid = (lo + hi) / 2; if (ess(mid) < target) hi = mid; else lo = mid; } tau = lo; E = ess(tau); }
@@ -599,7 +605,7 @@ function runSims(withGames, nUse) {
   const nowOf = new Map(); teamPs.forEach((ps, t) => ps.forEach((p, i) => nowOf.set(p, now[t][i])));
   const gidx = new Map();
   if (MODEL === "smart") for (const g of games) {
-    if (g.state !== "in" || g.frac > .97) continue;
+    if (g.state !== "in" || g.frac > .97 || 1 - g.frac < (CFG.cMin || 0)) continue;
     const gps = L.players.filter(p => p.src === "gts" && p.row != null && nowOf.has(p) && nowOf.get(p).g === g).map(p => [p, nowOf.get(p)]);
     if (gps.length && (CFG.kc || CFG.kd)) gidx.set(g, gameIndex(g, N, NR, gps));
   }
@@ -611,7 +617,7 @@ function runSims(withGames, nUse) {
     for (let s = 0; s < N; s++) R[s] = D[base + (idx ? idx[s] : s)] / 10;
     if (MODEL === "smart" && CFG.sqrtv && n.state === "in") {
       const fr = n.frac; let dm = 0; for (let s = 0; s < N; s++) dm += R[s]; dm /= N;
-      const a = Math.pow(fr, CFG.sx || .5);   // spread of the time left shrinks like (time left)^sx
+      const a = Math.pow(fr, (CFG.sxPos && CFG.sxPos[p.pos]) || CFG.sx || .5);   // spread of the time left shrinks like (time left)^sx
       for (let s = 0; s < N; s++) R[s] = n.m * Math.max(0, fr * dm + a * (R[s] - dm));
     } else for (let s = 0; s < N; s++) R[s] *= f;
     return R;
